@@ -355,86 +355,68 @@ def ap3_rec_anl(gram, model, direction="", dyn):
 
 # Recursively computing best analogies:
 
-def ap3_rec_anl(gram, model, direction='struct',
-                dyn={'forw':{}, 'backw':{}, 'struct':{}}):
+def ap3_rec_anl(gram, model, dyn={}):
     if len(gram) == 1:
-        return {'prob': 1, 'analogies': [{'split': gram,
-                                          'subst': gram,
-                                          'path': gram,
-                                          'score': 1}]}
-    if gram in dyn[direction]:
-        return dyn[direction][gram]
+        return {'prob': 1,
+                'tree': gram[0],
+                'analogies': {gram: 1}}
+    elif gram in dyn:
+        return dyn[gram]
     else:
         # Split gram into ctxt-goal duplets:
-        duplets  = ((gram[:i], gram[i:]) for i in range(1, len(gram)))
-        analogies = []
+        duplets  = [(gram[:i], gram[i:]) for i in range(1, len(gram))]
+        parse_dy = {duplet: {'prob': 0,
+                             'tree': (),
+                             'analogies': {}}
+                    for duplet in duplets}
         for duplet in duplets:
             ctxt, goal = duplet
             # Compute best analogical substitute duplets for (ctxt, goal):
-            rec_ctxt, rec_goal = ap3_rec_anl(ctxt, model, 'forw', dyn), \
-                                 ap3_rec_anl(goal, model, 'backw', dyn)
-            anl_ctxts = (anl['path'] for anl in rec_ctxt['analogies'])
-            anl_goals = (anl['path'] for anl in rec_goal['analogies'])
+            rec_ctxt, rec_goal = ap3_rec_anl(ctxt, model, dyn), \
+                                 ap3_rec_anl(goal, model, dyn)
+            # 
+            anl_ctxts = rec_ctxt['analogies'].keys()
+            anl_goals = rec_goal['analogies'].keys()
+            # Compute all best analogical substitutes:
             anl_duplets = list(product(anl_ctxts, anl_goals))
             # Compute directional analogies for each analogical substitute:
+            anl_dy = {}
+            duplet_prob = 0
             for anl_duplet in anl_duplets:
                 anl_ctxt, anl_goal = anl_duplet
                 # Was anl_ctxt a good analogical path for ctxt?
-                ctxt_prob = sum(anl['score'] for anl in rec_ctxt['analogies']
-                                             if anl['path'] == anl_ctxt)
+                anl_ctxt_wt = rec_ctxt['analogies'][anl_ctxt]
                 # Was anl_goal a good analogical path for goal?
-                goal_prob = sum(anl['score'] for anl in rec_goal['analogies']
-                                             if anl['path'] == anl_goal)
-                # (1) Are we at the target gram?
-                # If direction is "forw" or "backw", record directional links:
-                if direction != 'struct':
-                    link_dict = ap3_dir_anls(anl_duplet, model, direction)
-                # Else direction is "struct", so we're at the target ngram, so 
-                # simply record structural analogies and move on to next split:
-                elif direction == 'struct':
-                    struct_anls = ap3_struct_anls(anl_duplet, model)
-                    analogies += [{'split': duplet,
-                                   'subst': anl_duplet,
-                                   'path' : anl[0][0] + anl[0][1],
-                                   'score': (anl[1]
-                                             * ctxt_prob
-                                             * goal_prob)}
-                                  for anl in struct_anls[:5]]
-                    continue
-                # (2) Compute directional analogies
-                # Now direction is either 'forw' or 'backw', and later we should
-                # pick path elements accordingly, so set directional index:
-                dir_index = direction == 'backw'
-                # If structural analogies are already in dynamic dict then
-                # collect those involving appropriate directional links:
-                if anl_duplet in dyn['struct']:
-                    analogies += [{'split': duplet,
-                                   'subst': anl_duplet,
-                                   'path' : anl[0][0] + anl[0][1],
-                                   'score': (anl[1]
-                                             * link_dict[anl[0][dir_index]]
-                                             * ctxt_prob
-                                             * goal_prob)}
-                                  for anl in dyn['struct'][anl_duplet]
-                                  if anl[0][dir_index] in link_dict]
-                # Else compute structural analogies, record in dynamic dict
-                # and collect those involving appropriate directional links:
-                else:
-                    dyn['struct'][anl_duplet] = ap3_struct_anls(anl_duplet,
-                                                                model)
-                    analogies += [{'split': duplet,
-                                   'subst': anl_duplet,
-                                   'path' : anl[0][0] + anl[0][1],
-                                   'score': (anl[1]
-                                             * link_dict[anl[0][dir_index]]
-                                             * ctxt_prob
-                                             * goal_prob)}
-                                  for anl in dyn['struct'][anl_duplet]
-                                  if anl[0][dir_index] in link_dict]
-        prob = sum(anl['score'] for anl in analogies)
-        analogies.sort(key=lambda x: x['score'], reverse=True)
-        dyn[direction][gram] = {'prob': prob, 'analogies': analogies[:5]}
-        return dyn[direction][gram]
+                anl_goal_wt = rec_goal['analogies'][anl_goal]
+                # Compute all mixed analogies for current duplet:
+                anl_paths = ap3_mixed_anls(anl_duplet, model)
+                for anl_path in anl_paths:
+                    path_bigram = anl_path[0][0] + anl_path[0][1]
+                    score = anl_path[1] * anl_ctxt_wt * anl_goal_wt
+                    try:
+                        anl_dy[path_bigram]['substs'] += [anl_duplet]
+                        anl_dy[path_bigram]['score']  += score
+                    except:
+                        anl_dy[path_bigram] = {'substs': [anl_duplet],
+                                               'score': score}
+                    duplet_prob += score
+            #
+            parse_dy[duplet]['prob'] = duplet_prob        \
+                                       * rec_ctxt['prob'] \
+                                       * rec_goal['prob']
+            parse_dy[duplet]['analogies'] = anl_dy
+            parse_dy[duplet]['tree'] = (rec_ctxt['tree'], rec_goal['tree'])
+        prob = sum(parse_dy[duplet]['prob'] for duplet in parse_dy)
+        best_parse = sorted((parse_dy[duplet] for duplet in parse_dy),
+                            key=lambda x: x['prob'], reverse=True)[0]
+        tree = best_parse['tree']
+        anl_dy = best_parse['analogies']
+        anl_list = [(path, anl_dy[path]['score']) for path in anl_dy]
+        analogies = dict(sorted(anl_list, key=lambda x: x[1], reverse=True)[:5])
+        dyn[gram] = {'prob': prob,
+                     'tree': tree,
+                     'analogies': analogies}
+        return dyn[gram]
 
 def ap3_struct_anls(duplet, model):
     ctxt, goal = duplet
@@ -517,7 +499,7 @@ def ap3_mixed_anls(duplet, model):
     # Get possible analogical links: 
     bw_ctxts = [x for x in cdy['backw'][ctxt] if len(x) == 1]
     fw_goals = [x for x in cdy['forw'][goal] if len(x) == 1]
-    # Compute situated analogies:
+    # Compute full analogies:
     anl_dy = {}
     for anl_ctxt, anl_goal in anl_bridges:
         # Calculate weight of analogical bridge:
