@@ -251,17 +251,20 @@ def ctxt_dy(train):
         size += len(sentence) - 2
         trigrams = ngrams(sentence, 3)
         # Record cooccurrence data in cdy with forward and backward contexts:
-        for gram in trigrams[:-1]:
+        ctxt_dy_update(cdy, ('<s>',), ('<s>',))
+        for gram in trigrams:
             # Bigram model: (ctxt,) -> (goal,):
             ctxt_dy_update(cdy, gram[-2:-1], gram[-1:])
             # Trigram model: (ctxt,) –> (goal1, goal2) and
             #                (ctxt1, ctxt2) -> (goal,):
             ctxt_dy_update(cdy, gram[:-2], gram[-2:])
             ctxt_dy_update(cdy, gram[:-1], gram[-1:])
+        """
         # Last trigram (only relevant for trigram model):
         gram = trigrams[-1]
         ctxt_dy_update(cdy, gram[:-2], gram[-2:])
         ctxt_dy_update(cdy, gram[:-1], gram[-1:])
+        """
     return (cdy, size)
 
 # [Aux of ctxt_dy()] Updates context dictionary:
@@ -332,31 +335,11 @@ def anl_dy_update(anl_dy, bigram, path, anl_prob, n):
         anl_dy[bigram] = {'p_anl': anl_prob,
                           'paths': [(path, anl_prob)]}
 
-"""
-def ap3_rec_anl(gram, model, direction="", dyn):
-    cdy, pdy = model
-    if len(gram) == 1:
-        return {"score": 1, "dyn": dyn}
-    elif gram in dyn[direction]:
-        return {"score": dyn[direction][gram]["score"], "dyn": dyn}
-    elif direction == "forw":
-        duplets = ((ngram[:i], ngram[i:]) for i in range(1, len(ngram)))
-        paths = []
-        score = 0
-        for ctxt, goal in duplets:
-            rec_ctxt, rec_goal = (ap3_rec_anl(ctxt, model, "forw", ady),
-                                  ap3_rec_anl(goal, model, "backw", ady))
-            anl_pairs = product(rec_ctxt["dyn"]["paths"],
-                                rec_goal["dyn"]["paths"])
-            for anl_ctxt, anl_goal in anl_pairs:
-                dir_anls = ap3_dir_paths(anl_ctxt, anl_goal, model, "forw")
-                for dir_anl in dir_anls:
-"""
 
 # Recursively computing best analogies:
 
 def ap3_rec_anl(gram, model, dyn={}):
-    if len(gram) == 1:
+    if len(gram) == 1 or gram in (('<s>', '<s>'), ('</s>', '</s>')):
         return {'prob': 1,
                 'tree': gram[0],
                 'analogies': {gram: 1}}
@@ -454,39 +437,53 @@ def ap3_dir_anls(duplet, model, direction):
     ctxt, goal = duplet
     cdy, pdy = model
     
-    anl_ctxts = (x for x in cdy[direction][ctxt].keys() if len(x) == 1)
-    anl_goals = (x for x in cdy[direction][goal].keys() if len(x) == 1)
-    
-    attested = (x for x in pdy.keys() if len(x[0]) == 1 and len(x[1]) == 1)
-    
-    potential_paths = product(set(anl_ctxts), set(anl_goals))
-    anl_paths = set(attested).intersection(set(potential_paths))
-    
-    analogies = []
-    if direction == 'forw':
-        for anl_ctxt, anl_goal in anl_paths:
-            anl_prob = pdy[(anl_ctxt, anl_goal)]['joint'] \
-                       * pdy[(ctxt, anl_ctxt)]['backw'] \
-                       * pdy[(goal, anl_goal)]['backw']
-            analogies.append(((anl_ctxt, anl_goal), anl_prob))
-    elif direction == 'backw':
-        for anl_ctxt, anl_goal in anl_paths:
-            anl_prob = pdy[(anl_ctxt, anl_goal)]['joint'] \
-                       * pdy[(anl_ctxt, ctxt)]['forw'] \
-                       * pdy[(anl_goal, goal)]['forw']
-            analogies.append(((anl_ctxt, anl_goal), anl_prob))
-    
-    dir_index = direction == 'backw'
-    links = {}
-    for path, score in analogies:
-        try:
-            links[path[dir_index]] += score
-        except:
-            links[path[dir_index]] = score
-    return links #sorted(links.items(), key=lambda x: x[1], reverse=True)
+    # Get attested bigrams:
+    att_bigrams = [x for x in pdy.keys() if len(x[0]) == 1 and len(x[1]) == 1]
+    # Get contexts and goals for possible analogical bridges:
+    anl_ctxts = (x for x in cdy['backw'][goal] if len(x) == 1 and x != ('<s>',))
+    anl_goals = (x for x in cdy['forw'][ctxt] if len(x) == 1 and x != ('</s>',))
+    # Get attested analogical bridges:
+    poss_bridges = product(anl_ctxts, anl_goals)
+    anl_bridges = set(att_bigrams).intersection(set(poss_bridges))
+    # Get possible analogical links:
+    if ctxt == ('<s>', '<s>'):
+        fw_goals = [x for x in cdy['forw'][goal] if len(x) == 1]
+    elif goal == ('</s>', '</s>'):
+        bw_ctxts = [x for x in cdy['backw'][ctxt] if len(x) == 1]
+    # Compute full analogies:
+    anl_dy = {}
+    for anl_ctxt, anl_goal in anl_bridges:
+        # Calculate weight of analogical bridge:
+        bridge_weight = pdy[(anl_ctxt, anl_goal)]['joint'] \
+                        * pdy[(anl_ctxt, goal)]['forw']    \
+                        * pdy[(ctxt, anl_goal)]['backw']
+        # Get directional links for current structural path:
+        if ctxt == ('<s>', '<s>'):
+            fw_links = (x for x in fw_goals if x in cdy['forw'][anl_goal])
+            for fw_link in fw_links:
+                weight = pdy[(anl_goal, fw_link)]['forw'] \
+                         * pdy[(goal, fw_link)]['backw']
+                try:
+                    anl_dy[(anl_ctxt, anl_goal)] += weight
+                except:
+                    anl_dy[(anl_ctxt, anl_goal)] = weight
+        elif goal == ('</s>', '</s>'):
+            bw_links = (x for x in bw_ctxts if x in cdy['backw'][anl_ctxt])
+            for bw_link in bw_links:
+                weight = pdy[(bw_link, anl_ctxt)]['backw'] \
+                         * pdy[(bw_link, ctxt)]['forw']
+                try:
+                    anl_dy[(anl_ctxt, anl_goal)] += weight
+                except:
+                    anl_dy[(anl_ctxt, anl_goal)] = weight
+    return sorted(anl_dy.items(), key=lambda x: x[1], reverse=True)
 
 def ap3_mixed_anls(duplet, model):
     ctxt, goal = duplet
+    if ctxt == ('<s>', '<s>'):
+        return ap3_dir_anls(duplet, model, 'forw')
+    elif goal == ('</s>', '</s>'):
+        return ap3_dir_anls(duplet, model, 'backw')
     cdy, pdy = model
     # Get attested bigrams:
     att_bigrams = [x for x in pdy.keys() if len(x[0]) == 1 and len(x[1]) == 1]
