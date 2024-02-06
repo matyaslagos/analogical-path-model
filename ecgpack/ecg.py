@@ -20,17 +20,16 @@ import nltk
 def txt2list(filename):
     """Import a txt list of sentences as a list of lists of words.
     
-    Keyword arguments:
-    filename -- name of a txt file, containing one normalised sentence per line,
-        with no sentence-ending periods
+    Argument:
+        - filename (string), e.g.: 'grimm_corpus.txt'
     
     Returns:
-    list -- list of lists of words, e.g.
-        [['my', 'name', 'is', 'mary'], ['i', 'am', 'cool'], ..., ['bye']]
+        - list (of lists of strings), e.g.:
+          [['my', 'name', 'is', 'jolán'], ['i', 'am', 'cool'], ..., ['bye']]
     """
     with open(filename, mode='r', encoding='utf-8-sig') as file:
         lines = file.readlines()
-    return tuple(tuple(line.strip().split()) for line in lines)
+    return [line.strip().split() for line in lines]
 
 def txt2intlist(filename):
     """Import a txt list of sentences as a list of lists of words.
@@ -341,92 +340,103 @@ def anl_dy_update(anl_dy, bigram, path, anl_prob, n):
 
 # Works with ap3_internal_anls() and ap3_external_anls():
 def ap3_drec_anl(gram, model, dr='brdg', dyn={'brdg': {}, 'fw': {}, 'bw': {}}):
+    # Recursion ends when we reach single words or sentence markers:
     if len(gram) == 1 or gram in (('<s>', '<s>'), ('</s>', '</s>')):
         return {'prob': 1,
                 'tree': gram[0],
                 'analogies': {gram: 1}}
+    # Dynamic lookup:
     elif gram in dyn[dr]:
         return dyn[dr][gram]
+    # Carrying out the analysis:
     else:
-        # Split gram into ctxt-goal duplets:
+        # Split n-gram into all possible (ctxt, goal) duplets:
         duplets  = [(gram[:i], gram[i:]) for i in range(1, len(gram))]
+        # Compute analysis for each possible duplet:
         parse_dy = {duplet: {'prob': 0,
                              'tree': (),
                              'analogies': {}}
                     for duplet in duplets}
         for duplet in duplets:
             ctxt, goal = duplet
-            # Compute best analogical substitute duplets for (ctxt, goal):
+            # Recursively analyse ctxt and goal, looking forward resp. backward:
             rec_ctxt, rec_goal = ap3_drec_anl(ctxt, model, 'fw', dyn), \
                                  ap3_drec_anl(goal, model, 'bw', dyn)
-            # 
+            # Retrieve top 5 analogical substitutes for ctxt and goal:
             anl_ctxts = rec_ctxt['analogies'].keys()
             anl_goals = rec_goal['analogies'].keys()
-            # Compute all best analogical substitutes:
+            # Compute all combinations of best analogical substitutes:
             anl_duplets = list(product(anl_ctxts, anl_goals))
-            # Compute directional analogies for each analogical substitute:
+            # Compute analogies and probability for each analogical substitute
+            # in the appropriate direction (forw. or backw.):
             anl_dy = {}
             duplet_prob = 0
             for anl_duplet in anl_duplets:
                 anl_ctxt, anl_goal = anl_duplet
-                # Was anl_ctxt a good analogy for ctxt?
+                # (1) How good are the analogical substitutes?
+                # Weighting for: Was anl_ctxt a good analogy for ctxt?
                 anl_ctxt_wt = rec_ctxt['analogies'][anl_ctxt]
-                # Was anl_goal a good analogy for goal?
+                # Weighting for: Was anl_goal a good analogy for goal?
                 anl_goal_wt = rec_goal['analogies'][anl_goal]
-                # Check if internal analogies are already computed:
+                # (2) Finding internal analogies for analogical substitutes.
+                # If internal analogies are already computed, just get them:
                 if anl_duplet in dyn['brdg']:
-                    # Internals are already computed, just retrieve them:
                     anl_bridges = dyn['brdg'][anl_duplet]
+                # If internals aren't computed, compute and save them:
                 else:
-                    # Internals aren't computed, so compute them and record:
                     anl_bridges = ap3_internal_anls(anl_duplet, model)
                     dyn['brdg'][anl_duplet] = anl_bridges
-                # Check if we're at the top gram or at markers:
+                # (3) Finding external analogies (if necessary) and recording
+                #     the analogical data.
+                # If we're at the top n-gram or looking at markers, record
+                # just the internal analogies
+                # (dr is 'brdg' iff we're at the top n-gram):
                 if (dr == 'brdg')                               \
                 or (dr == 'bw' and anl_ctxt == ('<s>', '<s>'))  \
                 or (dr == 'fw' and anl_goal == ('</s>', '</s>')):
-                    # We're at the top gram, so return just the bridges
                     for bridge in anl_bridges:
                         anl_bigram = bridge[0][0] + bridge[0][1]
                         score = bridge[1] * anl_ctxt_wt * anl_goal_wt
-                        try:
+                        try: # if anl_bigram is already in anl_dy:
                             anl_dy[anl_bigram]['substs'] += [anl_duplet]
                             anl_dy[anl_bigram]['score']  += score
-                        except:
+                        except KeyError:
                             anl_dy[anl_bigram] = {'substs': [anl_duplet],
                                                    'score': score}
                         duplet_prob += score
+                # If we're in normal case, then compute external analogies
+                # and record the values weighted by them:
                 else:
-                    # We're not at top gram, so compute directional anls
                     anl_links = ap3_external_anls(anl_duplet, model, dr)
                     # Set directionality index for connecting links with bridge:
-                    d = (dr == 'bw')
+                    d, opp_d = ((dr == 'bw'), (dr != 'bw'))
                     for bridge in anl_bridges:
                         anl_bigram = bridge[0][0] + bridge[0][1]
                         internal_score = bridge[1] * anl_ctxt_wt * anl_goal_wt
                         external_score = sum(link[1] for link in anl_links
-                                             if link[0][d] == bridge[0][not(d)])
+                                             if link[0][d] == bridge[0][opp_d])
                         score = internal_score * external_score
-                        try:
+                        try: # if anl_bigram is already in anl_dy:
                             anl_dy[anl_bigram]['substs'] += [anl_duplet]
                             anl_dy[anl_bigram]['score']  += score
-                        except:
+                        except KeyError:
                             anl_dy[anl_bigram] = {'substs': [anl_duplet],
                                                    'score': score}
                         duplet_prob += score
-            # Summarise current tree's analysis:
+            # Summarise current tree's analogical data:
             parse_dy[duplet]['prob'] = duplet_prob        \
                                        * rec_ctxt['prob'] \
                                        * rec_goal['prob']
             parse_dy[duplet]['analogies'] = anl_dy
             parse_dy[duplet]['tree'] = (rec_ctxt['tree'], rec_goal['tree'])
-        # Select best parse for gram and get its properties:
+        # Select best parse for n-gram and get its analogical data:
         best_parse = sorted((parse_dy[duplet] for duplet in parse_dy),
                             key=lambda x: x['prob'], reverse=True)[0]
         prob = best_parse['prob']
         tree = best_parse['tree']
         anl_dy = best_parse['analogies']
         anl_list = [(path, anl_dy[path]['score']) for path in anl_dy]
+        # Get top 5 analogies by score as a dictionary of (path, score) pairs:
         analogies = dict(sorted(anl_list, key=lambda x: x[1], reverse=True)[:5])
         dyn[dr][gram] = {'prob': prob,
                          'tree': tree,
@@ -495,6 +505,43 @@ def ap3_external_anls(duplet, model, dr):
     return sorted(anl_dy.items(), key=lambda x: x[1], reverse=True)
 
 # (end of latest version)
+
+# -----
+# Retreiving most frequent words per word class (with Réka Bandi):
+# -----
+
+def freq_dict(corpus):
+    """Sorts words from a list of sentences by frequency per word class.
+    
+    Argument:
+        - corpus (list of lists of strings):
+          [['a', 'certain', 'king', 'had', 'a', 'beautiful', 'garden'],
+           ['in', 'the', 'garden', 'stood', 'a', 'tree'], ...]
+    
+    Returns:
+        - freq_dy (dict of string-list key-value pairs):
+          {'DT': [('the', 6770), ('a', 1909), ('all', 412), ...],
+           'JJ': [('little', 392), ('good', 203), ('old', 200), ...], ...}
+    """
+    # Compute unsorted frequency dicts per word class:
+    wc_dy = {}
+    for sentence in corpus:
+        for word, wc in nltk.pos_tag(sentence):
+            if wc in wc_dy:
+                try:
+                    wc_dy[wc][word] += 1
+                except KeyError:
+                    wc_dy[wc][word] = 1
+            else:
+                wc_dy[wc] = {word: 1}
+    # Sort the (word, freq) pairs by freq from big to small in each word class:
+    freq_dy = {}
+    for wc in wc_dy:
+        sorted_word_freqs = sorted(wc_dy[wc].items(),
+                                   key=lambda x: x[1],
+                                   reverse=True)
+        freq_dy[wc] = sorted_word_freqs
+    return freq_dy
  
 # Old version:
 def ap3_rec_anl(gram, model, dyn={}):
@@ -680,44 +727,6 @@ def ap3_dir_anls(duplet, model, direction):
                 except:
                     anl_dy[(anl_ctxt, anl_goal)] = weight
     return sorted(anl_dy.items(), key=lambda x: x[1], reverse=True)
-
-
-# -----
-# Retreiving most frequent words per word class (with Réka Bandi):
-# -----
-
-def freq_dict(corpus):
-    """Sorts words from a list of sentences by frequency per word class.
-    
-    Argument:
-        - corpus (list of lists of strings):
-          [['a', 'certain', 'king', 'had', 'a', 'beautiful', 'garden'],
-           ['in', 'the', 'garden', 'stood', 'a', 'tree'], ...]
-    
-    Returns:
-        - freq_dy (dict of string-list key-value pairs):
-          {'DT': [('the', 6770), ('a', 1909), ('all', 412), ...],
-           'JJ': [('little', 392), ('good', 203), ('old', 200), ...], ...}
-    """
-    # Compute unsorted frequency dicts per word class:
-    wc_dy = {}
-    for sentence in corpus:
-        for word, wc in nltk.pos_tag(sentence):
-            if wc in wc_dy:
-                try:
-                    wc_dy[wc][word] += 1
-                except KeyError:
-                    wc_dy[wc][word] = 1
-            else:
-                wc_dy[wc] = {word: 1}
-    # Sort the (word, freq) pairs by freq from big to small in each word class:
-    freq_dy = {}
-    for wc in wc_dy:
-        sorted_word_freqs = sorted(wc_dy[wc].items(),
-                                   key=lambda x: x[1],
-                                   reverse=True)
-        freq_dy[wc] = sorted_word_freqs
-    return freq_dy
 
 
 
