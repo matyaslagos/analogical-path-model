@@ -93,7 +93,7 @@ and the fox came and said to him , we will have all three , the princess , the h
 ah
 said the young man , that would be a great thing , but how can you contrive it
 if you will only listen , said the fox , it can be done
-when you come to the king , and he asks for the beautiful princess , you must say , “here she is” then he will be very joyful
+when you come to the king , and he asks for the beautiful princess , you must say , here she is , then he will be very joyful
 and you will mount the golden horse that they are to give you , and put out your hand to take leave of them
 but shake hands with the princess last
 then lift her quickly on to the horse behind you
@@ -169,7 +169,8 @@ which will save you a great deal of trouble in carrying such a heavy load about 
 with all my heart , said hans
 but as you are so kind to me , i must tell you one thing
 you will have a weary task to draw that silver about with you
-however , the horseman got off , took the silver , helped hans up , gave him the bridle into one hand and the whip into the other , and said , when you want to go very fast , smack your lips loudly together , and cry “jip” hans was delighted as he sat on the horse , drew himself up , squared his elbows , turned out his toes , cracked his whip , and rode merrily off , one minute whistling a merry tune , and another singing , no care and no sorrow , a fig for the morrow
+however , the horseman got off , took the silver , helped hans up , gave him the bridle into one hand and the whip into the other , and said , when you want to go very fast , smack your lips loudly together , and cry jip
+hans was delighted as he sat on the horse , drew himself up , squared his elbows , turned out his toes , cracked his whip , and rode merrily off , one minute whistling a merry tune , and another singing , no care and no sorrow , a fig for the morrow
 we 'll laugh and be merry , sing neigh down derry
 after a time he thought he should like to go a little faster , so he smacked his lips and cried jip
 away went the horse full gallop
@@ -2131,7 +2132,7 @@ one day her mother said to her
 come , little red-cap , here is a piece of cake and a bottle of wine
 take them to your grandmother , she is ill and weak , and they will do her good
 set out before it gets hot , and when you are going , walk nicely and quietly and do not run off the path , or you may fall and break the bottle , and then your grandmother will get nothing
-and when you go into her room , don 't forget to say , “good morning” , and don 't peep into every corner before you do it
+and when you go into her room , don 't forget to say , good morning , and don 't peep into every corner before you do it
 i will take great care , said little red-cap to her mother , and gave her hand on it
 the grandmother lived out in the wood , half a league from the village , and just as little red-cap entered the wood , a wolf met her
 red-cap did not know what a wicked creature he was , and was not at all afraid of him
@@ -2290,8 +2291,8 @@ and again a second time it said these words
 my darling , this is only a dream
 i went on through the house from room to room , but they were all empty , and everything was so grim and mysterious
 at last i went down to the cellar , and there sat a very , very old woman , who could not keep her head still
-i asked her if my betrothed lived here , and she answered , “ah , you poor child , you are come to a murderers den
-your betrothed does indeed live here , but he will kill you without mercy and afterwards cook and eat you” my darling , this is only a dream
+i asked her if my betrothed lived here , and she answered , ah , you poor child , you are come to a murderers den
+your betrothed does indeed live here , but he will kill you without mercy and afterwards cook and eat you , my darling , this is only a dream
 the old woman hid me behind a large cask , and scarcely had she done this when the robbers returned home , dragging a young girl along with them
 they gave her three kinds of wine to drink , white , red , and yellow , and with that she died
 my darling , this is only a dream
@@ -2549,10 +2550,11 @@ the third day one of the messengers came back , and said , i have travelled two 
 but yesterday , as i was climbing a high hill , among the trees of the forest where the fox and the hare bid each other good night , i saw a little hut
 and before the hut burnt a fire
 and round about the fire a funny little dwarf was dancing upon one leg , and singing
-“merrily the feast i 'll make
+merrily the feast i 'll make
 today i 'll brew , tomorrow bake
 merrily i 'll dance and sing , for next day will a stranger bring
-little does my lady dream rumpelstiltskin is my name” when the queen heard this she jumped for joy , and as soon as her little friend came she sat down upon her throne , and called all her court round to enjoy the fun
+little does my lady dream rumpelstiltskin is my name
+when the queen heard this she jumped for joy , and as soon as her little friend came she sat down upon her throne , and called all her court round to enjoy the fun
 and the nurse stood by her side with the baby in her arms , as if it was quite ready to be given up
 then the little man began to chuckle at the thought of having the poor child , to take home with him to his hut in the woods
 and he cried out , now , lady , what is my name
@@ -2831,7 +2833,9 @@ so up she ran from the cellar
 and sure enough the rascally cur had got the steak in his mouth , and was making off with it
 away ran catherine , and away ran the dog across the field
 but he ran faster than she , and stuck close to the steak
-it 's all gone , and “what can 't be cured must be endured” , said catherine
+it 's all gone
+what can 't be cured must be endured
+said catherine
 so she turned round
 and as she had run a good way and was tired , she walked home leisurely to cool herself
 now all this time the ale was running too , for catherine had not turned the cock
@@ -5364,7 +5368,7 @@ then they gave him the cloak , and he wished himself a fly , and in a moment he 
 the cloak is very well , said he
 now give me the sword
 no , said they
-not unless you undertake not to say , “heads off” for if you do we are all dead men
+not unless you undertake not to say , heads off , for if you do we are all dead men
 so they gave it him , charging him to try it on a tree
 he next asked for the boots also
 and the moment he had all three in his power , he wished himself at the golden mountain
@@ -5403,7 +5407,7 @@ asked the peasant
 in the first place buy yourself an a b c book of the kind which has a cock on the frontispiece
 in the second , turn your cart and your two oxen into money , and get yourself some clothes , and whatsoever else pertains to medicine
 thirdly , have a sign painted for yourself with the words
-“i am doctor knowall ,” and have that nailed up above your house-door
+i am doctor knowall , and have that nailed up above your house-door
 the peasant did everything that he had been told to do
 when he had doctored people awhile , but not long , a rich and great lord had some money stolen
 then he was told about doctor knowall who lived in such and such a village , and must know what had become of the money
@@ -5689,7 +5693,7 @@ or when stories were told by the fire at night which made the flesh creep , the 
 oh , it makes us shudder
 the younger sat in a corner and listened with the rest of them , and could not imagine what they could mean
 they are always saying
-“it makes me shudder , it makes me shudder” it does not make me shudder , thought he
+it makes me shudder , it makes me shudder , it does not make me shudder , thought he
 that , too , must be an art of which i understand nothing
 now it came to pass that his father said to him one day
 hearken to me , you fellow in the corner there , you are growing tall and strong , and you too must learn something by which you can earn your bread
@@ -6185,7 +6189,7 @@ you have not stood the trial and can stay here no longer
 go forth into the world , there you will learn what poverty is
 but as you have not a bad heart , and as i mean well by you , there is one thing i will grant you
 if you fall into any difficulty , come to the forest and cry
-“iron hans ,” and then i will come and help you
+iron hans , and then i will come and help you
 my power is great , greater than you think , and i have gold and silver in abundance
 then the king 's son left the forest , and walked by beaten and unbeaten paths ever onwards until at length he reached a great city
 there he looked for work , but could find none , and he learnt nothing by which he could help himself
@@ -6254,9 +6258,9 @@ the daughter wanted to hear who the strange knight was , but the king did not kn
 he followed the enemy , and i did not see him again
 she inquired of the gardener where his boy was , but he smiled , and said
 he has just come home on his three-legged horse , and the others have been mocking him , and crying
-“here comes our hobblety jib back again” they asked , too
-“under what hedge have you been lying sleeping all the time” so he said
-“i did the best of all , and it would have gone badly without me” and then he was still more ridiculed
+here comes our hobblety jib back again , they asked , too
+under what hedge have you been lying sleeping all the time , so he said
+i did the best of all , and it would have gone badly without me , and then he was still more ridiculed
 the king said to his daughter
 i will proclaim a great feast that shall last for three days , and you shall throw a golden apple
 perhaps the unknown man will show himself

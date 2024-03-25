@@ -5,7 +5,8 @@
 
 import math
 import random
-from itertools import product
+from itertools import product, chain
+from collections import defaultdict
 import numpy as np
 from numpy.linalg import norm
 import nltk
@@ -121,36 +122,6 @@ def tenfold_splits_25(corpus):
     sentences = sentences[:len(sentences)//4]
     return tenfold_splits(sentences)
 
-def tagged(text):
-    """
-    Bemenet: [['a', 'certain', 'king', 'had', 'a', 'beautiful', 'garden'],[...], ...]
-    Kimenet: {'DT': {'a': 1909,'the': 6969, ...}, JJ': {'certain': 8, 'beautiful': 116, 'golden': 91, ...}, ...}
-    """
-    tag_dict = {}
-    for line in text:
-        for tuple in nltk.pos_tag(line):
-            pos, word = tuple[1], tuple[0]
-            if pos in tag_dict:
-                if  word in tag_dict[pos]:
-                    tag_dict[pos][word] += 1
-                else: 
-                    tag_dict[pos][word] = 1
-            else:
-                tag_dict[pos] = {word:1} 
-    return tag_dict
-
-def freq_dict(corpus):
-    """
-    Bemenet: {'DT': {'a': 1909,'the': 6969, ...}, JJ': {'certain': 8, 'beautiful': 116, 'golden': 91, ...}, ...}
-    Kimenet: {'DT': [('the', 6969), ('a', 1909), ('all', 412),...}, 'JJ': [('little', 392), ('good', 203), ('old', 203),..}, ...}
-    """
-    tag_dict = tagged(corpus)
-    freq = {}
-    for pos in tag_dict:
-        sort_tags = sorted(tag_dict[pos].items(), key= lambda x: x [1], reverse= True)
-        freq[pos] = sort_tags
-    return freq
-
 # ----------------------------- #
 # General analogical path model #
 # ----------------------------- #
@@ -235,8 +206,8 @@ def gctxt(train, n):
 
 # [aux to ctxt_dy()] Return list of n-grams in sentence:
 def ngrams(sentence, n):
-    sentence = ('<s>',) * (n-1) + sentence + ('</s>',) * (n-1)
-    return tuple(zip(*(sentence[i:len(sentence)-n+i+1] for i in range(n))))
+    sentence = ['<s>'] * (n-1) + sentence + ['</s>']
+    return list(zip(*(sentence[i:len(sentence)-n+i+1] for i in range(n))))
 
 # -----
 # Analogical trigram model
@@ -258,12 +229,6 @@ def ctxt_dy(train):
             #                (ctxt1, ctxt2) -> (goal,):
             ctxt_dy_update(cdy, gram[:-2], gram[-2:])
             ctxt_dy_update(cdy, gram[:-1], gram[-1:])
-        """
-        # Last trigram (only relevant for trigram model):
-        gram = trigrams[-1]
-        ctxt_dy_update(cdy, gram[:-2], gram[-2:])
-        ctxt_dy_update(cdy, gram[:-1], gram[-1:])
-        """
     return (cdy, size)
 
 # [Aux of ctxt_dy()] Updates context dictionary:
@@ -335,7 +300,7 @@ def anl_dy_update(anl_dy, bigram, path, anl_prob, n):
                           'paths': [(path, anl_prob)]}
 
 # -----
-# Recursively computing the best analogies, obtaining trees as epiphenomena:
+# Recursively computing the best analogies, obtaining trees as epiphenomena
 # -----
 
 # Works with ap3_internal_anls() and ap3_external_anls():
@@ -461,7 +426,6 @@ def ap3_internal_anls(duplet, model):
                    * pdy[(ctxt, anl_goal)]['backw']   \
                    * pdy[(anl_ctxt, goal)]['forw']
         analogies.append(((anl_ctxt, anl_goal), anl_prob))
-    
     analogies.sort(key=lambda x: x[1], reverse=True)
     return analogies
 
@@ -504,13 +468,137 @@ def ap3_external_anls(duplet, model, dr):
             anl_dy[anl_link]  = link_weight
     return sorted(anl_dy.items(), key=lambda x: x[1], reverse=True)
 
+def duplet_backoff(duplet, model):
+    ctxt, goal = duplet
+    cdy, pdy = model
+    skip_goals = set(chain(*(cdy['forw'][skip].keys() for skip in cdy['forw']
+                                                      if skip[0] == ctxt[0])))
+    skip_ctxts = set(chain(*(cdy['backw'][skip].keys() for skip in cdy['backw']
+                                                      if skip[1:] == goal[1:])))
+    anl_goals = [sgoal for sgoal in skip_goals
+                       if sgoal in cdy['forw'][ctxt[1:]]]
+    anl_ctxts = [sctxt for sctxt in skip_ctxts
+                       if sctxt in cdy['backw'][goal[:1]]]
+    analogies = []
+    for anl_pair in product(anl_ctxts, anl_goals):
+        try:
+            bridge = pdy[anl_pair]['joint']
+        except KeyError:
+            continue
+        anl_ctxt, anl_goal = anl_pair
+        depart = pdy[(ctxt[:1], ctxt[1:])]['joint'] \
+                 * sum(pdy[(bo_ctxt, anl_goal)]['forw']
+                       for bo_ctxt in cdy['forw']
+                       if len(bo_ctxt) == 2
+                          and bo_ctxt[0] == ctxt[0]
+                          and anl_goal in cdy['forw'][bo_ctxt]) \
+                 * pdy[(ctxt[1:], anl_goal)]['forw']
+        print(anl_goal)
+        depart = depart / pdy[('_', anl_goal)]
+        arrive = pdy[(goal[:1], goal[1:])]['joint'] \
+                 * sum(pdy[(anl_ctxt, bo_goal)]['backw']
+                       for bo_goal in cdy['backw']
+                       if len(bo_goal) == 2
+                          and bo_goal[1] == goal[1]
+                          and anl_ctxt in cdy['backw'][bo_goal]) \
+                 * pdy[(anl_ctxt, goal[:1])]['backw']
+        arrive = arrive / pdy[(anl_ctxt, '_')]
+        score = depart * bridge * arrive
+        analogies.append(((anl_ctxt, anl_goal), (score)))
+    analogies.sort(key=lambda x: x[1], reverse=True)
+    return analogies
+
 # (end of latest version)
 
 # -----
-# Retreiving most frequent words per word class (with Réka Bandi):
+# Using skip-grams
 # -----
 
-def freq_dict(corpus):
+def skip_ctxt_dy(train):
+    size = 0
+    cdy = {'fw': defaultdict(lambda: defaultdict(int)),
+           'bw': defaultdict(lambda: defaultdict(int))}
+    for sentence in train:
+        size += len(sentence) + 1 # end-of-sentence marker
+        trigrams = ngrams(sentence, 3)
+        # Record cooccurrence data in cdy with forward and backward contexts:
+        for trigram in trigrams:
+            # Bigram model:          (ctxt2) -> (goal,):
+            skip_ctxt_dy_update(cdy, trigram[1:])
+            # Trigram model:  (ctxt1, ctxt2) -> (goal,):
+            skip_ctxt_dy_update(cdy, trigram)
+            # Skipgram model: (ctxt1, _____) -> (goal,):
+            skip_ctxt_dy_update(cdy, trigram[:1] + ('_',) + trigram[-1:])
+    return (cdy, size)
+
+def skip_ctxt_dy_update(cdy, gram):
+    cdy['fw'][gram[1:2]][gram[2:]] += 1
+    
+    # Forward contexts:
+    cdy['fw'][gram[:i]][gram[i:]] += 1
+    # Backward contexts:
+    cdy['bw'][gram[i:]][gram[:i]] += 1
+
+def skip_prob_dy(cdy, size):
+    pdy = {'lin': {}, 'emb': {}}
+    for ctxt in cdy['fw']:
+        for goal in cdy['fw'][ctxt]:
+            count = cdy['fw'][ctxt][goal]
+            joint = count / size
+            backw = count / sum(cdy['bw'][goal].values())
+            forw  = count / sum(cdy['fw'][ctxt].values())
+            pdy['lin'][(ctxt, goal)] = {'jt': joint, 'bw': backw, 'fw': forw}
+    for ctxt in cdy['']
+    return (cdy, pdy)
+
+def skip_model(train):
+    return skip_prob_dy(*skip_ctxt_dy(train))
+
+def skiplet_analogies(duplet, model):
+    cdy, pdy = model
+    ctxt, goal = duplet
+    c1, c2, g1, g2 = ctxt[:1], ctxt[1:], goal[:1], goal[1:]
+    # Obtaining analogical bridges
+    alt_goals = (w[:1] for w in cdy['fw'][c2] if '_' not in w)
+    alt_ctxts = (w[-1:] for w in cdy['bw'][g1] if '_' not in w)
+    anl_brdgs = set(product(alt_ctxts, alt_goals)).intersection(set(pdy['ln']))
+    # Obtaining analogical environments
+    anl_depts = (w[-1:] for w in cdy['bw'][c1] if '_' not in w)
+    anl_arrvs = (w[:1] for w in cdy['fw'][g2] if '_' not in w)
+    anl_envrs = set(product(anl_depts, anl_arrvs)).intersection(set(pdy['eb']))
+    analogies = []
+    for anl_brdg in anl_brdgs:
+        anl_ctxt, anl_goal = anl_brdg
+        # Bridge probability
+        brdg_prob = pdy[anl_brdg]['jt']         \
+                    * pdy[(c2, anl_goal)]['bw'] \
+                    * pdy[(anl_ctxt, g1)]['fw']
+        # Backward probability ("analogical departures")
+        skp_ctxt = ('_',) + anl_ctxt
+        anl_depts = set(w[-1:] for w in cdy['bw'][skp_ctxt]
+                               if '_' not in w and w in cdy['bw'][c1])
+        dept_prob = sum(pdy[(anl_dept, c1)]['bw']         # orig: 'fw'
+                        * pdy[(anl_dept, skp_ctxt)]['bw'] # orig: 'bw'
+                        for anl_dept in anl_depts)
+        # Forward probability ("analogical arrivals")
+        skp_goal = anl_goal + ('_',)
+        anl_arrvs = set(w[:1] for w in cdy['fw'][skp_goal]
+                              if '_' not in w and w in cdy['fw'][g2])
+        arrv_prob = sum(pdy[(g2, anl_arrv)]['fw']         # orig: 'bw'
+                        * pdy[(skp_goal, anl_arrv)]['fw'] # orig: 'fw'
+                        for anl_arrv in anl_arrvs)
+        # Analogical probability (of current bridge)
+        anl_prob = brdg_prob * dept_prob * arrv_prob
+        if anl_prob > 0:
+            analogies.append((anl_brdg, anl_prob))
+    analogies.sort(key=lambda x: x[1], reverse=True)
+    return analogies
+
+# -----
+# Retrieving most frequent words per word class (written with Réka Bandi):
+# -----
+
+def freq_dy(corpus):
     """Sorts words from a list of sentences by frequency per word class.
     
     Argument:
@@ -535,13 +623,13 @@ def freq_dict(corpus):
             else:
                 wc_dy[wc] = {word: 1}
     # Sort the (word, freq) pairs by freq from big to small in each word class:
-    freq_dy = {}
+    fdy = {}
     for wc in wc_dy:
         sorted_word_freqs = sorted(wc_dy[wc].items(),
                                    key=lambda x: x[1],
                                    reverse=True)
-        freq_dy[wc] = sorted_word_freqs
-    return freq_dy
+        fdy[wc] = sorted_word_freqs
+    return fdy
  
 # Old version:
 def ap3_rec_anl(gram, model, dyn={}):
