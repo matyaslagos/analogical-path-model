@@ -33,16 +33,50 @@ def prob_dy(train):
 def aps(bigram, model):
     cdy, pdy = model
     ctxt, goal = (bigram.split()[0],), (bigram.split()[1],)
-    anl_paths = []
+    # Z-shaped paths:
+    lr_words = defaultdict(float)
+    rl_words = defaultdict(float)
+    z_paths = []
     for anl_goal in cdy['fw'][ctxt]:
         for anl_ctxt in cdy['bw'][anl_goal]:
-            if goal in pdy[anl_ctxt]:
-                anl_prob = pdy[ctxt][anl_goal]['bw']       \
-                           * pdy[anl_ctxt][anl_goal]['jt'] \
+            if goal in pdy[anl_ctxt]: # bw jt fw
+                anl_prob = pdy[ctxt][anl_goal]['fw']       \
+                           * pdy[anl_ctxt][anl_goal]['bw'] \
                            * pdy[anl_ctxt][goal]['fw']
-                anl_paths.append((anl_ctxt + anl_goal, anl_prob))
-    anl_paths.sort(key=lambda x: x[1], reverse=True)
-    return anl_paths
+                lr_words[anl_ctxt] += anl_prob
+                rl_words[anl_goal] += anl_prob
+                z_paths.append((anl_ctxt, anl_goal))
+    # Analogical context words:
+    ll_words = defaultdict(float)
+    for anl_envr in cdy['bw'][ctxt]:
+        for anl_ctxt in cdy['fw'][anl_envr]:
+            if anl_ctxt != ('</s>',) and goal in pdy[anl_ctxt]:
+                anl_prob = pdy[anl_envr][ctxt]['bw']       \
+                           * pdy[anl_envr][anl_ctxt]['fw'] \
+                           * pdy[anl_ctxt][goal]['fw']
+                ll_words[anl_ctxt] += anl_prob
+    # Analogical goal words:
+    rr_words = defaultdict(float)
+    for anl_goal in cdy['fw'][ctxt]:
+        if anl_goal != ('</s>',):
+            for anl_envr in cdy['fw'][anl_goal]:
+                if goal in cdy['bw'][anl_envr]:
+                    anl_prob = pdy[goal][anl_envr]['fw']       \
+                               * pdy[anl_goal][anl_envr]['bw'] \
+                               * pdy[ctxt][anl_goal]['bw']
+                    rr_words[anl_goal] += anl_prob
+    # Best paths:
+    substs = defaultdict(float)
+    for l_word, r_word in z_paths:
+        l_prob = sum(pdy[l_word][word]['jt'] for word in pdy[l_word])
+        r_prob = sum(pdy[word][r_word]['jt'] for word in pdy if r_word in pdy[word])
+        substs[l_word + r_word] += (lr_words[l_word] * ll_words[l_word] / l_prob) \
+                                   * (rl_words[r_word] * rr_words[r_word] / r_prob)
+        substs[ctxt + r_word]   += rl_words[r_word] * rr_words[r_word] / r_prob
+        substs[l_word + goal]   += lr_words[l_word] * ll_words[l_word] / l_prob
+    substs = [x for x in substs.items() if x[1] > 0]
+    substs.sort(key=lambda x: x[1], reverse=True)
+    return substs
 
 def test_aps(bigram, model):
     # Z-shaped paths: joint or steps
@@ -53,13 +87,13 @@ def test_aps(bigram, model):
         for anl_ctxt in cdy['bw'][anl_goal]:
             if goal in pdy[anl_ctxt]:
                 
-                anl_prob = pdy[ctxt][anl_goal]['jt']       \
-                           * pdy[anl_ctxt][anl_goal]['jt'] \
-                           * pdy[anl_ctxt][goal]['jt']
-                '''
                 anl_prob = pdy[ctxt][anl_goal]['bw']       \
                            * pdy[anl_ctxt][anl_goal]['jt'] \
                            * pdy[anl_ctxt][goal]['fw']
+                '''
+                anl_prob = pdy[ctxt][anl_goal]['jt']       \
+                           * pdy[anl_ctxt][anl_goal]['jt'] \
+                           * pdy[anl_ctxt][goal]['jt']
                 '''
                 anl_paths.append((anl_ctxt + anl_goal, anl_prob))
     anl_paths.sort(key=lambda x: x[1], reverse=True)
