@@ -70,13 +70,18 @@ def aps2(bigram, model):
     cross_substs = defaultdict(float)
     for l_word, r_word in z_paths:
         l_prob = sum(pdy[l_word][word]['jt'] for word in pdy[l_word])
-        r_prob = sum(pdy[word][r_word]['jt'] for word in pdy if r_word in pdy[word])
-        substs[l_word + r_word] +=   (lr_words[l_word] * ll_words[l_word] / l_prob) \
-                                   * (rl_words[r_word] * rr_words[r_word] / r_prob)
+        r_prob = sum(pdy[word][r_word]['jt'] for word in pdy
+                                             if r_word in pdy[word])
+        substs[l_word + r_word] +=   (lr_words[l_word] * ll_words[l_word]
+                                                       / l_prob) \
+                                   * (rl_words[r_word] * rr_words[r_word]
+                                                       / r_prob)
         substs[ctxt + r_word]   += rl_words[r_word] * rr_words[r_word] / r_prob
         substs[l_word + goal]   += lr_words[l_word] * ll_words[l_word] / l_prob
-        cross_substs[l_word + r_word] +=   (lr_words[l_word] * ll_words[l_word] / l_prob) \
-                                         * (rl_words[r_word] * rr_words[r_word] / r_prob)
+        cross_substs[l_word + r_word] +=   (lr_words[l_word] * ll_words[l_word]
+                                                             / l_prob) \
+                                         * (rl_words[r_word] * rr_words[r_word]
+                                                             / r_prob)
     substs = [x for x in substs.items() if x[1] > 0]
     substs.sort(key=lambda x: x[1], reverse=True)
     cross_substs = [x for x in cross_substs.items() if x[1] > 0]
@@ -139,9 +144,17 @@ def prob_dy3(train):
     pdy = {ctxt: {goal: pdy[ctxt][goal] for goal in pdy[ctxt]} for ctxt in pdy}
     return (cdy, pdy)
 
-def aps3(duplet_string, model):
+def aps3(ctxt, goal, model):
+    '''
+    # If input is duplet_string, e.g. 'the ; old king'
     ctxt, goal = str2dpl(duplet_string)
+    '''
     cdy, pdy = model
+    total_freq = sum(sum(cdy['fw'][w1][w2]
+                         for w2 in cdy['fw'][w1]
+                         if len(w2) == 1 and w2 != ('</s>',))
+                     for w1 in cdy['fw']
+                     if len(w1) == 1)
     # Middle analogies
     lr_items = defaultdict(float)
     rl_items = defaultdict(float)
@@ -208,18 +221,73 @@ def aps3(duplet_string, model):
     # Best analogies
     substs = defaultdict(float)
     for l_item, r_item in middle_paths:
-        #l_prob = sum(pdy[l_word][word]['jt'] for word in pdy[l_word])
-        #r_prob = sum(pdy[word][r_word]['jt'] for word in pdy if r_word in pdy[word])
+        # Exclude long paths:
+        if len(l_item + r_item) > 2:
+            continue
+        l_prob = (sum(cdy['fw'][l_item].values()) / 2) / total_freq
+        r_prob = (sum(cdy['bw'][r_item].values()) / 2) / total_freq
         substs[l_item + r_item] +=   (lr_items[l_item] * ll_items[l_item]) \
-                                   * (rl_items[r_item] * rr_items[r_item])
-        substs[ctxt + r_item]   += rl_items[r_item] * rr_items[r_item]
-        substs[l_item + goal]   += lr_items[l_item] * ll_items[l_item]
+                                   * (rl_items[r_item] * rr_items[r_item]) \
+                                   / (l_prob * r_prob)
+        substs[ctxt + r_item]   += rl_items[r_item] * rr_items[r_item] / r_prob
+        substs[l_item + goal]   += lr_items[l_item] * ll_items[l_item] / l_prob
     substs = [x for x in substs.items() if x[1] > 0]
     substs.sort(key=lambda x: x[1], reverse=True)
     return substs
 
 def trig_ps(trigram_string, model):
-    pass
+    trigram = tuple(trigram_string.split())
+    cdy, pdy = model
+    splits = [(trigram[:i+1], trigram[i+1:] ) for i in range(2)]
+    anl_paths = defaultdict(float)
+    anl_dy = defaultdict(lambda: defaultdict(float))
+    for ctxt, goal in splits:
+        if len(ctxt) > 1:
+            rec_ctxts = aps3(ctxt[:1], ctxt[1:], model)
+        else:
+            rec_ctxts = [(ctxt, 1)]
+        if len(goal) > 1:
+            rec_goals = aps3(goal[:1], goal[1:], model)
+        else:
+            rec_goals = [(goal, 1)]
+        for ctxt_sub, ctxt_score in rec_ctxts:
+            for goal_sub, goal_score in rec_goals:
+                paths = aps3(ctxt_sub, goal_sub, model)
+                for path, path_score in paths:
+                    anl_score = path_score * ctxt_score * goal_score
+                    anl_paths[path] += anl_score
+                    anl_dy[(ctxt, goal)][(ctxt_sub, goal_sub)] += anl_score
+    path_dy = sorted(list(anl_paths.items()), key=lambda x: x[1], reverse=True)
+    return path_dy
+
+def rec_parse(gram, model, anl_dy):
+    # End recursion when we reach unigrams
+    if len(gram) == 1:
+        anl_dy[gram] = {'splits': {gram: 1}, 'anls': [gram, 1]}
+        return anl_dy
+    # Recursive step
+    splits = ((gram[:i], gram[i:]) for i in range(1,len(gram)-1))
+    split_anls = {}
+    for ctxt, goal in splits:
+        
+        split_anls[(ctxt, goal)] = defaultdict(float)
+        try:
+            rec_ctxt = anl_dy[ctxt]
+        except:
+            rec_ctxt = rec_parse(ctxt, model, anl_dy)
+        try:
+            rec_goal = anl_dy[goal]
+        except:
+            rec_goal = rec_parse(goal, model, anl_dy)
+        ctxt_subs = rec_ctxt['anls']
+        goal_subs = rec_goal['anls']
+        for ctxt_sub, ctxt_score in ctxt_subs:
+            for goal_sub, goal_score in goal_subs:
+                paths = aps3(ctxt_sub, goal_sub, model)[:5]
+                for path, path_score in paths:
+                    score = path_score * ctxt_score * goal_score
+                    split_anls[(ctxt, goal)][path] += score
+        
 
 def str2dpl(duplet_string):
     duplet_list = duplet_string.split()
