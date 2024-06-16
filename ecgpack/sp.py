@@ -1,5 +1,11 @@
-from ap import txt2list, train_test, ngrams_list
+from ap import txt2list, train_test
 from collections import defaultdict
+
+def ngrams_list(sentence, n):
+    beg = ['<s{}>'.format(i) for i in range(1,n)]
+    end = ['</s{}>'.format(i) for i in range(1,n)]
+    sentence = beg + sentence + end
+    return list(zip(*(sentence[i:len(sentence)-n+i+1] for i in range(n))))
 
 def ctxt_dy2(train):
     cdy = {'fw': defaultdict(lambda: defaultdict(int)),
@@ -225,9 +231,9 @@ def aps3(ctxt, goal, model):
                                    * (rl_items[r_item] * rr_items[r_item]) #\
                                    #/ (l_prob * r_prob)
         if len(ctxt) == 1:
-            substs[ctxt + r_item]   += rl_items[r_item] * rr_items[r_item]# / r_prob
+            substs[ctxt + r_item]   += (rr_items[r_item] / r_prob) * rl_items[r_item]
         if len(goal) == 1:
-            substs[l_item + goal]   += lr_items[l_item] * ll_items[l_item]# / l_prob
+            substs[l_item + goal]   += (ll_items[l_item] / l_prob) * lr_items[l_item]
     substs = [x for x in substs.items() if x[1] > 0]
     substs.sort(key=lambda x: x[1], reverse=True)
     return substs
@@ -268,8 +274,8 @@ def rec_parse(gram, model, anl_dy=None):
         pass
     # End recursion when we reach unigrams
     if len(gram) == 1:
-        anl_dy[gram] = [(gram, 1)]
-        return (anl_dy, [(gram, 1)])
+        anl_dy[gram] = [((gram, gram), 1)]
+        return (anl_dy, [((gram, gram), 1)])
     # Recursive step
     splits = ((gram[:i], gram[i:]) for i in range(1,len(gram)))
     split_anls = {}
@@ -281,11 +287,11 @@ def rec_parse(gram, model, anl_dy=None):
         goal_subs = rec_parse(goal, model, anl_dy)[1]
         for ctxt_sub, ctxt_score in ctxt_subs:
             for goal_sub, goal_score in goal_subs:
-                paths = aps3(ctxt_sub, goal_sub, model)[:5]
+                paths = aps3(ctxt_sub[0], goal_sub[0], model)[:5]
                 for path, path_score in paths:
-                    score = path_score * ctxt_score * goal_score
+                    score = path_score #* ctxt_score * goal_score
                     split_anls[(ctxt, goal)][path] += score
-                    anl_path_dy[path] += score
+                    anl_path_dy[(path, (ctxt, goal))] += score
     anls = sorted(list(anl_path_dy.items()), key=lambda x: x[1], reverse=True)[:5]
     anl_dy[gram] = anls
     return (anl_dy, anls)
@@ -295,16 +301,74 @@ def str2dpl(duplet_string):
     return (tuple(duplet_list[:duplet_list.index(';')]),
             tuple(duplet_list[duplet_list.index(';')+1:]))
 
-def bw_comps(word, model):
-    cdy, pdy = model
-    symm_comps = defaultdict(float)
-    for bw_nb in cdy['bw'][word]:
-        for comp in cdy['fw'][bw_nb]:
-            symm_comps[comp] += pdy[bw_nb][word]['bw'] * pdy[bw_nb][comp]['bw']
-    asym_comps = defaultdict(float)
-    for bw_nb in cdy['bw'][word]:
-        for comp in cdy['fw'][bw_nb]:
-            asym_comps[comp] += pdy[bw_nb][word]['fw'] * pdy[bw_nb][comp]['bw']
-    symms = sorted(list(symm_comps.items()), key=lambda x: x[1], reverse=True)
-    asyms = sorted(list(asym_comps.items()), key=lambda x: x[1], reverse=True)
-    return (symms, asyms)
+def ctxt_dy(corpus, n):
+    ngrams = [x for sentence in corpus for x in ngrams_list(sentence, n)]
+    ngrams_rev = [tuple(reversed(ngram)) for ngram in ngrams]
+    cdy = {}
+    cdy['fw'] = ctxt_dy_aux(ngrams, n)
+    cdy['bw'] = ctxt_dy_aux(ngrams_rev, n)
+    return cdy
+
+def ctxt_dy_aux(ngrams, n):
+    # End recursion at unigrams, just return dict with counts
+    if n == 1:
+        cdy = {ngram[0]: {'#': ngrams.count(ngram)} for ngram in set(ngrams)}
+        cdy['#'] = sum(cdy[word]['#'] for word in cdy)
+        return cdy
+    # Sort tails of ngrams according to head word
+    cdy_lists = defaultdict(list)
+    for ngram in ngrams:
+        cdy_lists[ngram[0]].append(ngram[1:])
+    # Recursively compute context dict for each head word
+    cdy = {word: ctxt_dy_aux(cdy_lists[word], n-1) for word in cdy_lists}
+    cdy['#'] = sum(cdy[word]['#'] for word in cdy)
+    return cdy
+
+def fw_count(ngram, cdy):
+    rem_dy = cdy['fw']
+    for word in ngram:
+        try:
+            rem_dy = rem_dy[word]
+        except:
+            return 0
+    return rem_dy['#']
+
+def bw_count(ngram, cdy):
+    rem_dy = cdy['bw']
+    for word in reversed(ngram):
+        try:
+            rem_dy = rem_dy[word]
+        except:
+            return 0
+    return rem_dy['#']
+
+def fw_look(ngram, cdy):
+    rem_dy = cdy['fw']
+    for word in ngram:
+        rem_dy = rem_dy[word]
+    return rem_dy
+
+def fw_nbs(cdy, ngram1, ngram2):
+    return fw_nbs_aux(fw_look(ngram1, cdy), fw_look(ngram2, cdy))
+
+def fw_nbs_aux(rem_dy1, rem_dy2, path=()):
+    if len(rem_dy1) == 1 or len(rem_dy2) == 1:
+        return []
+    rem_dys = (rem_dy1, rem_dy2)
+    index = len(rem_dy1) <= len(rem_dy2)
+    nbs = []
+    for word in rem_dys[index]:
+        if word != '#' and word in rem_dys[1-index]:
+            path += (word,)
+            nbs.append(path)
+            nbs += fw_nbs_aux(rem_dy1[word], rem_dy2[word], path)
+            path = path[:-1]
+    return nbs
+
+def prob(dr, ngram1, ngram2, cdy):
+    if dr == 'fw':
+        return fw_count(ngram1 + ngram2, cdy) / fw_count(ngram1, cdy)
+    elif dr == 'bw':
+        return fw_count(ngram1 + ngram2, cdy) / bw_count(ngram2, cdy)
+    elif dr == 'jt':
+        return fw_count(ngram1 + ngram2, cdy) / fw_count((), cdy)
