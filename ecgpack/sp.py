@@ -342,26 +342,26 @@ def bw_count(ngram, cdy):
             return 0
     return rem_dy['#']
 
-def fw_look(ngram, cdy):
+def fw_lookup(ngram, cdy):
     rem_dy = cdy['fw']
     for word in ngram:
         try:
             rem_dy = rem_dy[word]
         except KeyError:
-            print('Could not find', ngram)
+            print('Could not forw. find', ngram)
     return rem_dy
 
-def bw_look(ngram, cdy):
+def bw_lookup(ngram, cdy):
     rem_dy = cdy['bw']
     for word in reversed(ngram):
         try:
             rem_dy = rem_dy[word]
         except KeyError:
-            print('Could not find', ngram)
+            print('Could not backw. find', ngram)
     return rem_dy
 
 def fw_nbs(ngram, cdy):
-    return fw_nbs_aux(fw_look(ngram, cdy))
+    return fw_nbs_aux(fw_lookup(ngram, cdy))
 
 def fw_nbs_aux(rem_dy, path=()):
     if len(rem_dy) == 1:
@@ -379,7 +379,7 @@ def fw_nbs_aux(rem_dy, path=()):
     return nbs
 
 def bw_nbs(ngram, cdy):
-    return bw_nbs_aux(bw_look(ngram, cdy))
+    return bw_nbs_aux(bw_lookup(ngram, cdy))
 
 def bw_nbs_aux(rem_dy, path=()):
     if len(rem_dy) == 1:
@@ -397,7 +397,7 @@ def bw_nbs_aux(rem_dy, path=()):
     return nbs
 
 def cmn_fw_nbs(ngram1, ngram2, cdy):
-    return cmn_fw_nbs_aux(fw_look(ngram1, cdy), fw_look(ngram2, cdy))
+    return cmn_fw_nbs_aux(fw_lookup(ngram1, cdy), fw_lookup(ngram2, cdy))
 
 def cmn_fw_nbs_aux(rem_dy1, rem_dy2, path=()):
     if len(rem_dy1) == 1 or len(rem_dy2) == 1:
@@ -405,8 +405,8 @@ def cmn_fw_nbs_aux(rem_dy1, rem_dy2, path=()):
     rem_dys = (rem_dy1, rem_dy2)
     index = len(rem_dy1) <= len(rem_dy2)
     nbs = []
-    for word in rem_dys[index]:
-        if word != '#' and word in rem_dys[1-index]:
+    for word in rem_dys[1-index]:
+        if word != '#' and word in rem_dys[index]:
             if word[-1] == '>':
                 nbs.append(path + (word,))
                 continue
@@ -417,7 +417,7 @@ def cmn_fw_nbs_aux(rem_dy1, rem_dy2, path=()):
     return nbs
 
 def cmn_bw_nbs(ngram1, ngram2, cdy):
-    return cmn_bw_nbs_aux(bw_look(ngram1, cdy), bw_look(ngram2, cdy))
+    return cmn_bw_nbs_aux(bw_lookup(ngram1, cdy), bw_lookup(ngram2, cdy))
 
 def cmn_bw_nbs_aux(rem_dy1, rem_dy2, path=()):
     if len(rem_dy1) == 1 or len(rem_dy2) == 1:
@@ -425,8 +425,8 @@ def cmn_bw_nbs_aux(rem_dy1, rem_dy2, path=()):
     rem_dys = (rem_dy1, rem_dy2)
     index = len(rem_dy1) <= len(rem_dy2)
     nbs = []
-    for word in rem_dys[index]:
-        if word != '#' and word in rem_dys[1-index]:
+    for word in rem_dys[1-index]:
+        if word != '#' and word in rem_dys[index]:
             if word[-1] == '>':
                 nbs.append(tuple(reversed(path + (word,))))
                 continue
@@ -437,14 +437,44 @@ def cmn_bw_nbs_aux(rem_dy1, rem_dy2, path=()):
     return nbs
 
 def aps_demo(ctxt, goal, cdy):
-    paths = []
+    rl_grams = defaultdict(float)
+    lr_grams = defaultdict(float)
+    md_pairs = defaultdict(float)
     for anl_goal in fw_nbs(ctxt, cdy):
-        for anl_ctxt in cmn_bw_nbs(goal, anl_goal, cdy):
+        for anl_ctxt in cmn_bw_nbs(anl_goal, goal, cdy):
             prob =   prob_fw(ctxt, anl_goal, cdy)     \
                    * prob_bw(anl_ctxt, anl_goal, cdy) \
                    * prob_fw(anl_ctxt, goal, cdy)
-            paths.append((anl_ctxt + anl_goal, prob))
-    return sorted(paths, key=lambda x: x[1], reverse=True)
+            md_pairs[(anl_ctxt, anl_goal)] += prob
+            rl_grams[anl_goal] += prob
+            lr_grams[anl_ctxt] += prob
+    rr_grams = defaultdict(float)
+    for anl_goal in fw_nbs(ctxt, cdy):
+        if anl_goal[0][:2] == '</':
+            continue
+        for rgt_envr in cmn_fw_nbs(anl_goal, goal, cdy):
+            prob =   prob_fw(ctxt, anl_goal, cdy)     \
+                   * prob_fw(anl_goal, rgt_envr, cdy) \
+                   * prob_bw(goal, rgt_envr, cdy)
+            rr_grams[anl_goal] += prob
+    ll_grams = defaultdict(float)
+    for anl_ctxt in bw_nbs(goal, cdy):
+        if anl_ctxt[0][:2] == '<s':
+            continue
+        for lft_envr in cmn_bw_nbs(ctxt, anl_ctxt, cdy):
+            prob =   prob_bw(lft_envr, ctxt, cdy)     \
+                   * prob_fw(lft_envr, anl_ctxt, cdy) \
+                   * prob_fw(anl_ctxt, goal, cdy)
+            ll_grams[anl_ctxt] += prob
+    anls = defaultdict(float)
+    for anl_ctxt, anl_goal in md_pairs:
+        r_prob = rl_grams[anl_goal] * rr_grams[anl_goal]
+        l_prob = lr_grams[anl_ctxt] * ll_grams[anl_ctxt]
+        j_prob = r_prob * l_prob / prob_jt(anl_ctxt, anl_goal, cdy)
+        anls[(ctxt, anl_goal)]     += r_prob
+        anls[(anl_ctxt, goal)]     += l_prob
+        anls[(anl_ctxt, anl_goal)] += j_prob 
+    return sorted(list(anls.items()), key=lambda x: x[1], reverse=True)
 
 def prob_fw(ngram1, ngram2, cdy):
     return fw_count(ngram1 + ngram2, cdy) / fw_count(ngram1, cdy)
