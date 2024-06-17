@@ -329,7 +329,7 @@ def fw_count(ngram, cdy):
     for word in ngram:
         try:
             rem_dy = rem_dy[word]
-        except:
+        except KeyError:
             return 0
     return rem_dy['#']
 
@@ -338,20 +338,68 @@ def bw_count(ngram, cdy):
     for word in reversed(ngram):
         try:
             rem_dy = rem_dy[word]
-        except:
+        except KeyError:
             return 0
     return rem_dy['#']
 
 def fw_look(ngram, cdy):
     rem_dy = cdy['fw']
     for word in ngram:
-        rem_dy = rem_dy[word]
+        try:
+            rem_dy = rem_dy[word]
+        except KeyError:
+            print('Could not find', ngram)
     return rem_dy
 
-def fw_nbs(cdy, ngram1, ngram2):
-    return fw_nbs_aux(fw_look(ngram1, cdy), fw_look(ngram2, cdy))
+def bw_look(ngram, cdy):
+    rem_dy = cdy['bw']
+    for word in reversed(ngram):
+        try:
+            rem_dy = rem_dy[word]
+        except KeyError:
+            print('Could not find', ngram)
+    return rem_dy
 
-def fw_nbs_aux(rem_dy1, rem_dy2, path=()):
+def fw_nbs(ngram, cdy):
+    return fw_nbs_aux(fw_look(ngram, cdy))
+
+def fw_nbs_aux(rem_dy, path=()):
+    if len(rem_dy) == 1:
+        return []
+    nbs = []
+    for word in rem_dy:
+        if word != '#':
+            if word[-1] == '>':
+                nbs.append(path + (word,))
+                continue
+            path += (word,)
+            nbs.append(path)
+            nbs += fw_nbs_aux(rem_dy[word], path)
+            path = path[:-1]
+    return nbs
+
+def bw_nbs(ngram, cdy):
+    return bw_nbs_aux(bw_look(ngram, cdy))
+
+def bw_nbs_aux(rem_dy, path=()):
+    if len(rem_dy) == 1:
+        return []
+    nbs = []
+    for word in rem_dy:
+        if word != '#':
+            if word[-1] == '>':
+                nbs.append(tuple(reversed(path + (word,))))
+                continue
+            path += (word,)
+            nbs.append(tuple(reversed(path)))
+            nbs += bw_nbs_aux(rem_dy[word], path)
+            path = path[:-1]
+    return nbs
+
+def cmn_fw_nbs(ngram1, ngram2, cdy):
+    return cmn_fw_nbs_aux(fw_look(ngram1, cdy), fw_look(ngram2, cdy))
+
+def cmn_fw_nbs_aux(rem_dy1, rem_dy2, path=()):
     if len(rem_dy1) == 1 or len(rem_dy2) == 1:
         return []
     rem_dys = (rem_dy1, rem_dy2)
@@ -359,16 +407,50 @@ def fw_nbs_aux(rem_dy1, rem_dy2, path=()):
     nbs = []
     for word in rem_dys[index]:
         if word != '#' and word in rem_dys[1-index]:
+            if word[-1] == '>':
+                nbs.append(path + (word,))
+                continue
             path += (word,)
             nbs.append(path)
-            nbs += fw_nbs_aux(rem_dy1[word], rem_dy2[word], path)
+            nbs += cmn_fw_nbs_aux(rem_dy1[word], rem_dy2[word], path)
             path = path[:-1]
     return nbs
 
-def prob(dr, ngram1, ngram2, cdy):
-    if dr == 'fw':
-        return fw_count(ngram1 + ngram2, cdy) / fw_count(ngram1, cdy)
-    elif dr == 'bw':
-        return fw_count(ngram1 + ngram2, cdy) / bw_count(ngram2, cdy)
-    elif dr == 'jt':
-        return fw_count(ngram1 + ngram2, cdy) / fw_count((), cdy)
+def cmn_bw_nbs(ngram1, ngram2, cdy):
+    return cmn_bw_nbs_aux(bw_look(ngram1, cdy), bw_look(ngram2, cdy))
+
+def cmn_bw_nbs_aux(rem_dy1, rem_dy2, path=()):
+    if len(rem_dy1) == 1 or len(rem_dy2) == 1:
+        return []
+    rem_dys = (rem_dy1, rem_dy2)
+    index = len(rem_dy1) <= len(rem_dy2)
+    nbs = []
+    for word in rem_dys[index]:
+        if word != '#' and word in rem_dys[1-index]:
+            if word[-1] == '>':
+                nbs.append(tuple(reversed(path + (word,))))
+                continue
+            path += (word,)
+            nbs.append(tuple(reversed(path)))
+            nbs += cmn_bw_nbs_aux(rem_dy1[word], rem_dy2[word], path)
+            path = path[:-1]
+    return nbs
+
+def aps_demo(ctxt, goal, cdy):
+    paths = []
+    for anl_goal in fw_nbs(ctxt, cdy):
+        for anl_ctxt in cmn_bw_nbs(goal, anl_goal, cdy):
+            prob =   prob_fw(ctxt, anl_goal, cdy)     \
+                   * prob_bw(anl_ctxt, anl_goal, cdy) \
+                   * prob_fw(anl_ctxt, goal, cdy)
+            paths.append((anl_ctxt + anl_goal, prob))
+    return sorted(paths, key=lambda x: x[1], reverse=True)
+
+def prob_fw(ngram1, ngram2, cdy):
+    return fw_count(ngram1 + ngram2, cdy) / fw_count(ngram1, cdy)
+    
+def prob_bw(ngram1, ngram2, cdy):
+    return fw_count(ngram1 + ngram2, cdy) / bw_count(ngram2, cdy)
+
+def prob_jt(ngram1, ngram2, cdy):
+    return fw_count(ngram1 + ngram2, cdy) / fw_count((), cdy)
