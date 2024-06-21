@@ -449,8 +449,11 @@ def aps(ctxt, goal, cdy, n=float('inf')):
             rl_grams[anl_goal] += prob
             lr_grams[anl_ctxt] += prob
     rr_grams = defaultdict(float)
-    for anl_goal in rl_grams:#fw_nbs(ctxt, cdy, len(goal)):
-        if anl_goal[0][:2] == '</':
+    for anl_goal in rl_grams:
+        if goal[-1][:2] == '</':
+            rr_grams[anl_goal] = 1
+            continue
+        if anl_goal[-1][:2] == '</':
             continue
         for rgt_envr in cmn_fw_nbs(anl_goal, goal, cdy):
             prob =   prob_fw(ctxt, anl_goal, cdy)     \
@@ -458,7 +461,10 @@ def aps(ctxt, goal, cdy, n=float('inf')):
                    * prob_bw(goal, rgt_envr, cdy)
             rr_grams[anl_goal] += prob
     ll_grams = defaultdict(float)
-    for anl_ctxt in lr_grams:#bw_nbs(goal, cdy, len(ctxt)):
+    for anl_ctxt in lr_grams:
+        if ctxt[0][:2] == '<s':
+            ll_grams[anl_ctxt] = 1
+            continue
         if anl_ctxt[0][:2] == '<s':
             continue
         for lft_envr in cmn_bw_nbs(ctxt, anl_ctxt, cdy):
@@ -503,12 +509,12 @@ def rec_parse(gram, cdy, anl_dy=None, n=float('inf')):
         goal_subs = rec_parse(goal, cdy, anl_dy, n)[1]
         for ctxt_sub, ctxt_score in ctxt_subs:
             for goal_sub, goal_score in goal_subs:
-                paths = aps(ctxt_sub[0], goal_sub[0], cdy, n)[:5]
+                paths = aps(ctxt_sub[0], goal_sub[0], cdy, n)[:10]
                 for path, path_score in paths:
                     score = path_score * ctxt_score * goal_score
                     split_anls[(ctxt, goal)][path] += score
                     anl_path_dy[(path, (ctxt, goal))] += score
-    anls = sorted(list(anl_path_dy.items()), key=lambda x: x[1], reverse=True)[:5]
+    anls = sorted(list(anl_path_dy.items()), key=lambda x: x[1], reverse=True)[:10]
     anl_dy[gram] = anls
     return (anl_dy, anls)
 
