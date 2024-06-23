@@ -48,10 +48,10 @@ def train_test(corpus):
     sentences = corpus.copy()
     random.shuffle(sentences)
     n = round(len(sentences) * 0.9)
-    train = sentences[:n]
+    train = (tuple(sentence) for sentence in sentences[:n])
     vocab = {word for sentence in train for word in sentence}
-    test = [sentence for sentence in sentences[n:]
-                     if set(sentence).issubset(vocab)]
+    test = [tuple(sentence) for sentence in sentences[n:]
+                            if set(sentence).issubset(vocab)]
     return (train, test)
 
 # ----------------------------------- #

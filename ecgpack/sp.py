@@ -1,5 +1,31 @@
-from ap import txt2list, train_test
+from ap import txt2list
 from collections import defaultdict
+import random
+
+def train_test(corpus):
+    """Randomly separate `sentences` into 90pct training and 10pct testing data.
+
+    Randomly separates `sentences` into 90 percent training data and 10 percent
+    testing data, such that the testing data is filtered to only contain
+    sentences whose words all occur in the training data (so actual testing data
+    may be smaller than 10 percent).
+
+    Keyword arguments:
+    sentences -- list of lists of words (output of `txt_to_list()`)
+
+    Returns:
+    tuple -- (train, test), where `train` is randomly selected 90pct of
+        `sentences`, and `test` is remaining 10pct filtered s.t. none of its
+        sentences contain words that aren't in `train`
+    """
+    sentences = corpus.copy()
+    random.shuffle(sentences)
+    n = round(len(sentences) * 0.9)
+    train = [sentence for sentence in sentences[:n]]
+    vocab = {word for sentence in train for word in sentence}
+    test = [tuple(sentence) for sentence in sentences[n:]
+                            if set(sentence).issubset(vocab)]
+    return (train, test)
 
 def ngrams_list(sentence, n):
     beg = ['<s{}>'.format(i) for i in range(1,n)]
