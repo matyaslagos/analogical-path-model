@@ -2,6 +2,7 @@ from ap import txt2list
 from collections import defaultdict
 import random
 
+
 def train_test(corpus):
     """Randomly separate `sentences` into 90pct training and 10pct testing data.
 
@@ -502,7 +503,7 @@ def aps(ctxt, goal, cdy, n=float('inf')):
     for anl_ctxt, anl_goal in md_pairs:
         r_prob = rl_grams[anl_goal] * rr_grams[anl_goal]
         l_prob = lr_grams[anl_ctxt] * ll_grams[anl_ctxt]
-        j_prob = r_prob * l_prob / prob_jt(anl_ctxt, anl_goal, cdy)
+        j_prob = r_prob * l_prob# / prob_jt(anl_ctxt, anl_goal, cdy)
         if len(ctxt + anl_goal)     < n:
             anls[(ctxt + anl_goal)]     += r_prob
         if len(anl_ctxt + goal)     < n:
@@ -552,3 +553,72 @@ def prob_bw(ngram1, ngram2, cdy):
 
 def prob_jt(ngram1, ngram2, cdy):
     return fw_count(ngram1 + ngram2, cdy) / fw_count((), cdy)
+
+def rec_parse2(gram, cdy, anl_dy=None, n=float('inf')):
+    # Use empty dict as default value for argument `anl_dy`
+    if anl_dy == None:
+        anl_dy = {}
+    # Attempt dynamic lookup
+    try:
+        return (anl_dy, anl_dy[gram][0])
+    except KeyError:
+        pass
+    # End recursion when we reach unigrams
+    if len(gram) == 1:
+        anl_dy[gram] = ([((gram, gram), 1)], [((gram, gram), 1)])
+        return (anl_dy, [((gram, gram), 1)])
+    # Recursive step
+    splits = ((gram[:i], gram[i:]) for i in range(1,len(gram)))
+    split_anls = defaultdict(lambda: defaultdict(float))
+    anl_path_dy = defaultdict(float)
+    for ctxt, goal in splits:
+        # Recursive calls
+        ctxt_subs = rec_parse2(ctxt, cdy, anl_dy, n)[1]
+        goal_subs = rec_parse2(goal, cdy, anl_dy, n)[1]
+        for ctxt_sub, ctxt_score in ctxt_subs:
+            for goal_sub, goal_score in goal_subs:
+                paths = aps(ctxt_sub[0], goal_sub[0], cdy, n)[:10]
+                for path, path_score in paths:
+                    score = path_score * ctxt_score * goal_score
+                    split_anls[(ctxt_sub[1], goal_sub[1])][(path,
+                                              (ctxt_sub[0], goal_sub[0]))] += score
+                    anl_path_dy[(path,
+                                 (ctxt_sub[1], goal_sub[1]),
+                                 (ctxt_sub[0], goal_sub[0]))] += score
+    '''
+    best_split = sorted([split_anls[key] for key in split_anls],
+                        key=lambda x: sum(x.values()), reverse=True)[0]
+    '''
+    
+    best_anls = sorted(list(anl_path_dy.items()), key=lambda x: x[1], reverse=True)[:10]
+    all_anls  = split_anls
+    anl_dy[gram] = (best_anls, all_anls)
+    return (anl_dy, best_anls)
+
+def ppt(tree, coords=(), ones_out=[]):
+    if isinstance(tree, str):
+        print(bars(coords, ones_out) + tree)
+    else:
+        ppt(tree[0], coords + (0,), ones_out)
+        ppt(tree[1], coords + (1,), ones_out + [len(coords) + 1])
+
+def bars(coords, ones_out):
+    bar_tup = ()
+    stop = False
+    for i, coord in enumerate(reversed(coords)):
+        if coord == 0 and not stop:
+            if i != 0:
+                bar_tup += ('┌─',)
+            else:
+                bar_tup += ('┌ ',)
+        elif not stop:
+            stop = True
+            if i != 0:
+                bar_tup += ('└─',)
+            else:
+                bar_tup += ('└ ',)
+        elif (len(coords) - i) in ones_out:
+            bar_tup += ('  ',)
+        else:
+            bar_tup += ('│ ',)
+    return ''.join(reversed(bar_tup))
