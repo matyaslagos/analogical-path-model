@@ -608,17 +608,17 @@ def bars(coords, ones_out):
     for i, coord in enumerate(reversed(coords)):
         if coord == 0 and not stop:
             if i != 0:
-                bar_tup += ('┌─',)
+                bar_tup += ('┌',)
             else:
                 bar_tup += ('┌ ',)
         elif not stop:
             stop = True
             if i != 0:
-                bar_tup += ('└─',)
+                bar_tup += ('└',)
             else:
                 bar_tup += ('└ ',)
         elif (len(coords) - i) in ones_out:
-            bar_tup += ('  ',)
+            bar_tup += (' ',)
         else:
-            bar_tup += ('│ ',)
+            bar_tup += ('│',)
     return ''.join(reversed(bar_tup))
