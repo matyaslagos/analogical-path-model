@@ -503,7 +503,7 @@ def aps(ctxt, goal, cdy, n=float('inf')):
     for anl_ctxt, anl_goal in md_pairs:
         r_prob = rl_grams[anl_goal] * rr_grams[anl_goal]
         l_prob = lr_grams[anl_ctxt] * ll_grams[anl_ctxt]
-        j_prob = r_prob * l_prob# / prob_jt(anl_ctxt, anl_goal, cdy)
+        j_prob = r_prob * l_prob / prob_jt(anl_ctxt, anl_goal, cdy)
         if len(ctxt + anl_goal)     < n:
             anls[(ctxt + anl_goal)]     += r_prob
         if len(anl_ctxt + goal)     < n:
@@ -565,8 +565,8 @@ def rec_parse2(gram, cdy, anl_dy=None, n=float('inf')):
         pass
     # End recursion when we reach unigrams
     if len(gram) == 1:
-        anl_dy[gram] = ([((gram, gram), 1)], [((gram, gram), 1)])
-        return (anl_dy, [((gram, gram), 1)])
+        anl_dy[gram] = ([((gram, gram[0]), 1)], [((gram, gram[0]), 1)])
+        return (anl_dy, [((gram, gram[0]), 1)])
     # Recursive step
     splits = ((gram[:i], gram[i:]) for i in range(1,len(gram)))
     split_anls = defaultdict(lambda: defaultdict(float))
@@ -589,11 +589,43 @@ def rec_parse2(gram, cdy, anl_dy=None, n=float('inf')):
     best_split = sorted([split_anls[key] for key in split_anls],
                         key=lambda x: sum(x.values()), reverse=True)[0]
     '''
-    
     best_anls = sorted(list(anl_path_dy.items()), key=lambda x: x[1], reverse=True)[:10]
     all_anls  = split_anls
     anl_dy[gram] = (best_anls, all_anls)
     return (anl_dy, best_anls)
+
+def rec_parse_tree(tree, cdy, anl_dy=None, n=float('inf')):
+    # Use empty dict as default value for argument `anl_dy`
+    if anl_dy == None:
+        anl_dy = {}
+    # Attempt dynamic lookup
+    try:
+        return (anl_dy, anl_dy[tree])
+    except KeyError:
+        pass
+    # End recursion when we reach unigrams
+    if len(tree) == 1:
+        anls = [{'path': tree, 'score': 1, 'split': tree[0], 'subst': tree[0]}]
+        anl_dy[tree] = anls
+        return (anl_dy, anls)
+    # Recursive step
+    ctxt, goal = tree[0], tree[1]
+    anls = []
+    # Recursive calls
+    rec_ctxts = rec_parse_tree(ctxt, cdy, anl_dy, n)[1][:10]
+    rec_goals = rec_parse_tree(goal, cdy, anl_dy, n)[1][:10]
+    for rec_ctxt in rec_ctxts:
+        for rec_goal in rec_goals:
+            paths = aps(rec_ctxt['path'], rec_goal['path'], cdy, n)[:20]
+            for path, path_score in paths:
+                score = path_score * rec_ctxt['score'] * rec_goal['score']
+                split = (rec_ctxt['split'], rec_goal['split'])
+                subst = (rec_ctxt['path'], rec_goal['path'])
+                anls.append({'path': path, 'score': score,
+                             'split': split, 'subst': subst})
+    anls.sort(reverse=True, key=lambda x: x['score'])
+    anl_dy[tree] = anls
+    return (anl_dy, anls)
 
 def ppt(tree, coords=(), ones_out=[]):
     if isinstance(tree, str):
