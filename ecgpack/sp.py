@@ -466,15 +466,16 @@ def cmn_bw_nbs_aux(rem_dy1, rem_dy2, n, path=()):
 def aps(ctxt, goal, cdy, n=float('inf')):
     rl_grams = defaultdict(float)
     lr_grams = defaultdict(float)
-    md_pairs = defaultdict(float)
+    md_pairs = set()
     for anl_goal in fw_nbs(ctxt, cdy, len(goal)):
         for anl_ctxt in cmn_bw_nbs(anl_goal, goal, cdy, len(ctxt)):
-            prob =   prob_fw(ctxt, anl_goal, cdy)     \
-                   * prob_bw(anl_ctxt, anl_goal, cdy) \
-                   * prob_fw(anl_ctxt, goal, cdy)
-            md_pairs[(anl_ctxt, anl_goal)] += prob
-            rl_grams[anl_goal] += prob
-            lr_grams[anl_ctxt] += prob
+            rl_prob =   prob_bw(anl_ctxt, anl_goal, cdy) \
+                      * prob_fw(anl_ctxt,     goal, cdy)
+            lr_prob =   prob_fw(anl_ctxt, anl_goal, cdy) \
+                      * prob_bw(    ctxt, anl_goal, cdy)
+            md_pairs.add((anl_ctxt, anl_goal))
+            rl_grams[anl_goal] += rl_prob
+            lr_grams[anl_ctxt] += lr_prob
     rr_grams = defaultdict(float)
     for anl_goal in rl_grams:
         if goal[-1][:2] == '</':
@@ -483,10 +484,9 @@ def aps(ctxt, goal, cdy, n=float('inf')):
         if anl_goal[-1][:2] == '</':
             continue
         for rgt_envr in cmn_fw_nbs(anl_goal, goal, cdy):
-            prob =   prob_fw(ctxt, anl_goal, cdy)     \
-                   * prob_fw(anl_goal, rgt_envr, cdy) \
-                   * prob_bw(goal, rgt_envr, cdy)
-            rr_grams[anl_goal] += prob
+            rr_prob =   prob_fw(anl_goal, rgt_envr, cdy) \
+                      * prob_bw(    goal, rgt_envr, cdy)
+            rr_grams[anl_goal] += rr_prob
     ll_grams = defaultdict(float)
     for anl_ctxt in lr_grams:
         if ctxt[0][:2] == '<s':
@@ -495,15 +495,14 @@ def aps(ctxt, goal, cdy, n=float('inf')):
         if anl_ctxt[0][:2] == '<s':
             continue
         for lft_envr in cmn_bw_nbs(ctxt, anl_ctxt, cdy):
-            prob =   prob_bw(lft_envr, ctxt, cdy)     \
-                   * prob_fw(lft_envr, anl_ctxt, cdy) \
-                   * prob_fw(anl_ctxt, goal, cdy)
-            ll_grams[anl_ctxt] += prob
+            ll_prob =   prob_fw(lft_envr,     ctxt, cdy) \
+                      * prob_bw(lft_envr, anl_ctxt, cdy)
+            ll_grams[anl_ctxt] += ll_prob
     anls = defaultdict(float)
     for anl_ctxt, anl_goal in md_pairs:
-        r_prob = rl_grams[anl_goal] * rr_grams[anl_goal]
-        l_prob = lr_grams[anl_ctxt] * ll_grams[anl_ctxt]
-        j_prob = r_prob * l_prob / prob_jt(anl_ctxt, anl_goal, cdy)
+        r_prob = rr_grams[anl_goal] * rl_grams[anl_goal]
+        l_prob = ll_grams[anl_ctxt] * lr_grams[anl_ctxt]
+        j_prob = r_prob * l_prob
         if len(ctxt + anl_goal)     < n:
             anls[(ctxt + anl_goal)]     += r_prob
         if len(anl_ctxt + goal)     < n:
@@ -559,61 +558,83 @@ def rec_parse2(gram, cdy, anl_dy=None, n=float('inf')):
     if anl_dy == None:
         anl_dy = {}
     # Attempt dynamic lookup
-    try:
-        return (anl_dy, anl_dy[gram][0])
-    except KeyError:
-        pass
+    if gram in anl_dy:
+        return anl_dy
     # End recursion when we reach unigrams
     if len(gram) == 1:
-        anl_dy[gram] = ([((gram, gram[0]), 1)], [((gram, gram[0]), 1)])
-        return (anl_dy, [((gram, gram[0]), 1)])
+        anls = [{'path': gram, 'score': 1, 'split': gram[0], 'subst': gram[0]}]
+        anl_dy[gram] = anls
+        return anl_dy
     # Recursive step
     splits = ((gram[:i], gram[i:]) for i in range(1,len(gram)))
-    split_anls = defaultdict(lambda: defaultdict(float))
-    anl_path_dy = defaultdict(float)
+    anls = []
     for ctxt, goal in splits:
         # Recursive calls
-        ctxt_subs = rec_parse2(ctxt, cdy, anl_dy, n)[1]
-        goal_subs = rec_parse2(goal, cdy, anl_dy, n)[1]
-        for ctxt_sub, ctxt_score in ctxt_subs:
-            for goal_sub, goal_score in goal_subs:
-                paths = aps(ctxt_sub[0], goal_sub[0], cdy, n)[:10]
+        rec_ctxts = rec_parse2(ctxt, cdy, anl_dy, n)[ctxt][:30]
+        rec_goals = rec_parse2(goal, cdy, anl_dy, n)[goal][:30]
+        for rec_ctxt in rec_ctxts:
+            for rec_goal in rec_goals:
+                paths = aps(rec_ctxt['path'], rec_goal['path'], cdy, n)
                 for path, path_score in paths:
-                    score = path_score * ctxt_score * goal_score
-                    split_anls[(ctxt_sub[1], goal_sub[1])][(path,
-                                              (ctxt_sub[0], goal_sub[0]))] += score
-                    anl_path_dy[(path,
-                                 (ctxt_sub[1], goal_sub[1]),
-                                 (ctxt_sub[0], goal_sub[0]))] += score
-    '''
-    best_split = sorted([split_anls[key] for key in split_anls],
-                        key=lambda x: sum(x.values()), reverse=True)[0]
-    '''
-    best_anls = sorted(list(anl_path_dy.items()), key=lambda x: x[1], reverse=True)[:10]
-    all_anls  = split_anls
-    anl_dy[gram] = (best_anls, all_anls)
-    return (anl_dy, best_anls)
+                    score = path_score * rec_ctxt['score'] * rec_goal['score']
+                    split = (rec_ctxt['split'], rec_goal['split'])
+                    subst = (rec_ctxt['path'], rec_goal['path'])
+                    anls.append({'path': path, 'score': score,
+                                 'split': split, 'subst': subst})
+    anls.sort(reverse=True, key=lambda x: x['score'])
+    anl_dy[gram] = anls
+    return anl_dy
+
+def rec_parse3(gram, cdy, anl_dy=None, n=float('inf')):
+    # Use empty dict as default value for argument `anl_dy`
+    if anl_dy == None:
+        anl_dy = {}
+    # Attempt dynamic lookup
+    if gram in anl_dy:
+        return anl_dy
+    # End recursion when we reach unigrams
+    if len(gram) == 1:
+        anls = [{'path': gram, 'score': 1, 'split': gram[0]}]
+        anl_dy[gram] = anls
+        return anl_dy
+    # Recursive step
+    splits = ((gram[:i], gram[i:]) for i in range(1,len(gram)))
+    anls = defaultdict(lambda: defaultdict(float))
+    for ctxt, goal in splits:
+        # Recursive calls
+        rec_ctxts = rec_parse3(ctxt, cdy, anl_dy, n)[ctxt][:10]
+        rec_goals = rec_parse3(goal, cdy, anl_dy, n)[goal][:10]
+        for rec_ctxt in rec_ctxts:
+            for rec_goal in rec_goals:
+                paths = aps(rec_ctxt['path'], rec_goal['path'], cdy, n)
+                for path, path_score in paths:
+                    score = path_score * rec_ctxt['score'] * rec_goal['score']
+                    split = (rec_ctxt['split'], rec_goal['split'])
+                    anls[split][path] += score
+    best_split = sorted(list(anls.items()), key=lambda x: sum(x[1].values()), reverse=True)[0]
+    anls = [{'split': best_split[0], 'path': key, 'score': best_split[1][key]} for key in best_split[1]]
+    anls.sort(reverse=True, key=lambda x: x['score'])
+    anl_dy[gram] = anls
+    return anl_dy
 
 def rec_parse_tree(tree, cdy, anl_dy=None, n=float('inf')):
     # Use empty dict as default value for argument `anl_dy`
     if anl_dy == None:
         anl_dy = {}
     # Attempt dynamic lookup
-    try:
-        return (anl_dy, anl_dy[tree])
-    except KeyError:
-        pass
+    if tree in anl_dy:
+        return anl_dy
     # End recursion when we reach unigrams
     if len(tree) == 1:
         anls = [{'path': tree, 'score': 1, 'split': tree[0], 'subst': tree[0]}]
         anl_dy[tree] = anls
-        return (anl_dy, anls)
+        return anl_dy
     # Recursive step
     ctxt, goal = tree[0], tree[1]
     anls = []
     # Recursive calls
-    rec_ctxts = rec_parse_tree(ctxt, cdy, anl_dy, n)[1][:10]
-    rec_goals = rec_parse_tree(goal, cdy, anl_dy, n)[1][:10]
+    rec_ctxts = rec_parse_tree(ctxt, cdy, anl_dy, n)[ctxt][:10]
+    rec_goals = rec_parse_tree(goal, cdy, anl_dy, n)[goal][:10]
     for rec_ctxt in rec_ctxts:
         for rec_goal in rec_goals:
             paths = aps(rec_ctxt['path'], rec_goal['path'], cdy, n)[:20]
@@ -625,7 +646,36 @@ def rec_parse_tree(tree, cdy, anl_dy=None, n=float('inf')):
                              'split': split, 'subst': subst})
     anls.sort(reverse=True, key=lambda x: x['score'])
     anl_dy[tree] = anls
-    return (anl_dy, anls)
+    return anl_dy
+
+def rec_parse_tree2(tree, cdy, anl_dy=None, n=float('inf')):
+    # Use empty dict as default value for argument `anl_dy`
+    if anl_dy == None:
+        anl_dy = {}
+    # Attempt dynamic lookup
+    if tree in anl_dy:
+        return anl_dy
+    # End recursion when we reach unigrams
+    if len(tree) == 1:
+        anls = [{'path': tree, 'score': 1}]
+        anl_dy[tree] = anls
+        return anl_dy
+    # Recursive step
+    ctxt, goal = tree[0], tree[1]
+    anls = defaultdict(float)
+    # Recursive calls
+    rec_ctxts = rec_parse_tree2(ctxt, cdy, anl_dy, n)[ctxt][:20]
+    rec_goals = rec_parse_tree2(goal, cdy, anl_dy, n)[goal][:20]
+    for rec_ctxt in rec_ctxts:
+        for rec_goal in rec_goals:
+            paths = aps(rec_ctxt['path'], rec_goal['path'], cdy, n)
+            for path, path_score in paths:
+                score = path_score * rec_ctxt['score'] * rec_goal['score']
+                anls[path] += score
+    anls = [{'path': path, 'score': anls[path]} for path in anls]
+    anls.sort(reverse=True, key=lambda x: x['score'])
+    anl_dy[tree] = anls
+    return anl_dy
 
 def ppt(tree, coords=(), ones_out=[]):
     if isinstance(tree, str):
@@ -654,3 +704,9 @@ def bars(coords, ones_out):
         else:
             bar_tup += ('│',)
     return ''.join(reversed(bar_tup))
+
+def sum_paths(path_dict):
+    sums_dy = defaultdict(float)
+    for item in path_dict:
+        sums_dy[item['path']] += item['score']
+    return sorted(list(sums_dy.items()), key=lambda x: x[1], reverse=True)
