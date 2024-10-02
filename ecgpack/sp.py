@@ -1,17 +1,282 @@
 from ap import txt2list
-from collections import defaultdict
+from collections import defaultdict, Counter
 import random
 import math
+import itertools
+from pprint import pp
 
 # -----
 # Model building algorithms
 # -----
 
+def train_test(corpus):
+    """Randomly separate `sentences` into 90pct training and 10pct testing data.
+
+    Randomly separates `sentences` into 90 percent training data and 10 percent
+    testing data, such that the testing data is filtered to only contain
+    sentences whose words all occur in the training data (so actual testing data
+    may be smaller than 10 percent).
+
+    Keyword arguments:
+    sentences -- list of lists of words (output of `txt_to_list()`)
+
+    Returns:
+    tuple -- (train, test), where `train` is randomly selected 90pct of
+        `sentences`, and `test` is remaining 10pct filtered s.t. none of its
+        sentences contain words that aren't in `train`
+    """
+    sentences = corpus.copy()
+    random.shuffle(sentences)
+    n = round(len(sentences) * 0.9)
+    train = [list(sentence) for sentence in sentences[:n]]
+    vocab = {word for sentence in train for word in sentence}
+    test = [tuple(sentence) for sentence in sentences[n:]
+                            if set(sentence).issubset(vocab)]
+    return (train, test)
+
 def ngrams_list(sentence, n):
-    beg = ['<s{}>'.format(i) for i in range(1,n)]
-    end = ['</s{}>'.format(i) for i in range(1,n)]
+    beg = ['<s{}>'.format(i) for i in range(1, n)]
+    end = ['</s{}>'.format(i) for i in range(1, n)]
     sentence = beg + sentence + end
-    return list(zip(*(sentence[i:len(sentence)-n+i+1] for i in range(n))))
+    ends = [tuple(['<s0>'] + beg), tuple(end + ['</s{}>'.format(n)])]
+    return list(zip(*(sentence[i:len(sentence)-n+i+1] for i in range(n)))) + ends
+
+def slot_ctxt_dy(corpus):
+    grams = [tuple(['<s>'] + sentence + ['</s>']) for sentence in corpus]
+    cdy = slot_ctxt_dy_aux_stars_ctxts(grams)
+    gdy = slot_ctxt_dy_aux_stars_goals(grams)
+    return (cdy, gdy)
+
+def nesting_dict():
+    return defaultdict(nesting_dict)
+
+def slot_ctxt_dy_aux(grams):
+    # Initialise context dictionary
+    ctxt_dict = nesting_dict()
+    # Add new dictionary structure for each gram
+    for gram in grams:
+        seen_slot_grams = set()
+        for slot_gram, filler in slot_grams(gram):
+            fill = False
+            traversing_dict = ctxt_dict
+            path = ()
+            for head in slot_gram:
+                path += (head,)
+                # Mark that we've seen a slot and filler should be recorded
+                if head == '_':
+                    fill = True
+                if head not in traversing_dict:
+                    traversing_dict[head] = {'$': nesting_dict()}
+                    traversing_dict[head]['$']['#'] = 0
+                # If first time seeing this prefix in this gram, add count
+                if path not in seen_slot_grams:
+                    traversing_dict[head]['$']['#'] += 1
+                    seen_slot_grams.add(path)
+                # Add filler
+                if fill:
+                    # Record filler in nested dict for easier common-
+                    # neighbour search
+                    filler_dict = traversing_dict[head]['$']
+                    for i, filler_head in enumerate(filler):
+                        if i == len(filler) - 1:
+                            try:
+                                filler_dict[filler_head]['#'] += 1
+                            except TypeError:
+                                filler_dict[filler_head]['#'] = 1
+                        filler_dict = filler_dict[filler_head]
+                traversing_dict = traversing_dict[head]
+    return ctxt_dict
+
+def slot_ctxt_dy_aux_stars_ctxts(grams):
+    # Initialise context dictionary
+    ctxt_dict = nesting_dict()
+    # Add new dictionary structure for each gram
+    for gram in grams:
+        seen_slot_grams = set()
+        for slot_gram, fillers in slot_plus_grams_ctxts(gram):
+            fill = False
+            traversing_dict = ctxt_dict
+            path = ()
+            for head in slot_gram:
+                path += (head,)
+                # Mark that we've seen a slot and filler should be recorded
+                if head == '_':
+                    fill = True
+                if head not in traversing_dict:
+                    traversing_dict[head] = {'$': nesting_dict()}
+                    traversing_dict[head]['$']['#'] = 0
+                # If first time seeing this prefix in this gram, add count
+                # and filler
+                if path not in seen_slot_grams:
+                    traversing_dict[head]['$']['#'] += 1
+                    seen_slot_grams.add(path)
+                if fill:
+                    # Record filler in nested dict for easier common-
+                    # neighbour search
+                    filler_dict = traversing_dict[head]['$']
+                    for filler in fillers:
+                        for i, filler_head in enumerate(filler):
+                            if i == len(filler) - 1:
+                                try:
+                                    filler_dict[filler_head]['#'] += 1
+                                except TypeError:
+                                    filler_dict[filler_head]['#'] = 1
+                            filler_dict = filler_dict[filler_head]
+                        filler_dict = traversing_dict[head]['$']
+                traversing_dict = traversing_dict[head]
+    return ctxt_dict
+
+def slot_ctxt_dy_aux_stars_goals(grams):
+    # Initialise context dictionary
+    ctxt_dict = nesting_dict()
+    # Add new dictionary structure for each gram
+    for gram in grams:
+        seen_slot_grams = set()
+        for filler, slot_grams in slot_plus_grams_goals(gram):
+            traversing_dict = ctxt_dict
+            path = ()
+            for head in filler:
+                path += (head,)
+                if head not in traversing_dict:
+                    traversing_dict[head] = {'$': nesting_dict()}
+                    traversing_dict[head]['$']['#'] = 0
+                # If first time seeing this prefix in this gram, add count
+                # and filler
+                if path not in seen_slot_grams:
+                    traversing_dict[head]['$']['#'] += 1
+                    seen_slot_grams.add(path)
+                if path == filler:
+                    # Record filler in nested dict for easier common-
+                    # neighbour search
+                    slot_gram_dict = traversing_dict[head]['$']
+                    fill = False
+                    for slot_gram in slot_grams:
+                        for i, slot_gram_head in enumerate(slot_gram):
+                            if slot_gram_head == '_':
+                                fill = True
+                            if fill:
+                                try:
+                                    slot_gram_dict[slot_gram_head]['#'] += 1
+                                except TypeError:
+                                    slot_gram_dict[slot_gram_head]['#'] = 1
+                            slot_gram_dict = slot_gram_dict[slot_gram_head]
+                        slot_gram_dict = traversing_dict[head]['$']
+                traversing_dict = traversing_dict[head]
+    return ctxt_dict
+
+def slot_plus_grams_ctxts(gram):
+    slot_dict = defaultdict(list)
+    for i in range(len(gram)):
+        for j in range(i + 1, min(len(gram) + 1, len(gram) + i)):
+            slot_gram, filler = gram[:i] + ('_',) + gram[j:], gram[i:j]
+            if i > 0 and j < len(gram):
+                fillers = [filler]
+                stop = i
+            else:
+                if i == 0:
+                    fillers = tails(filler)
+                    stop = i + 1
+                if j == len(gram):
+                    fillers = inits(filler)
+                    stop = i
+            for k in range(stop):
+                slot_subgram = slot_gram[k:]
+                slot_dict[slot_subgram] += fillers
+                if slot_subgram[:1] == ('_',):
+                    for l in range(2, len(slot_subgram)):
+                        plus_gram = ('_', '+') + slot_subgram[l:]
+                        slot_dict[plus_gram] += fillers
+                if slot_subgram[-1:] == ('_',):
+                    for l in range(1, len(slot_subgram) - 1):
+                        plus_gram = slot_subgram[:l] + ('+', '_')
+                        slot_dict[plus_gram] += fillers
+    for slot_gram, fillers in slot_dict.items():
+        yield (slot_gram, fillers)
+
+def slot_plus_grams_goals(gram):
+    slot_dict = defaultdict(list)
+    for i in range(len(gram)):
+        for j in range(i + 1, min(len(gram) + 1, len(gram) + i)):
+            slot_gram, filler = gram[:i] + ('_',) + gram[j:], gram[i:j]
+            if i > 0 and j < len(gram):
+                fillers = [filler]
+                stop = i
+            else:
+                if i == 0:
+                    fillers = tails(filler)
+                    stop = i + 1
+                if j == len(gram):
+                    fillers = inits(filler)
+                    stop = i
+            for k in range(stop):
+                slot_subgram = slot_gram[k:]
+                for filler in fillers:
+                    slot_dict[filler].append(slot_subgram)
+                    for l in range(len(filler)):
+                        for m in range(l + 1, min(len(filler) + 1, len(filler) + l)):
+                            plus_filler = filler[:l] + ('+',) + filler[m:]
+                            slot_dict[plus_filler].append(slot_subgram)
+    for filler, slot_grams in slot_dict.items():
+        yield (filler, slot_grams)
+
+def slot_grams(gram):
+    for i in range(len(gram)):
+        for j in range(i + 1, len(gram) + 1):
+            yield (gram[:i] + ('_',) + gram[j:], gram[i:j])
+
+def slot_grams_stars_ctxts(gram):
+    star_grams = defaultdict(list)
+    for i in range(len(gram)):
+        for j in range(i+1, min(len(gram)+1, i+len(gram))):
+            slot_gram, fillers = gram[:i] + ('_',) + gram[j:], [gram[i:j]]
+            if slot_gram[:1] == ('_',):
+                for k in range(2, len(slot_gram)):
+                    star_grams[('_',) + ('+',) + slot_gram[k:]] += fillers
+            if slot_gram[-1:] == ('_',):
+                for k in range(1,len(slot_gram)-1):
+                    filler_inits = [filler[:l] for filler in fillers for l in range(1,len(filler)+1)]
+                    star_grams[slot_gram[:k] + ('+',) + ('_',)] += filler_inits
+            yield (slot_gram, fillers)
+    for star_gram, fillers in star_grams.items():
+        yield (star_gram, fillers)
+
+def slot_grams_stars_goals(gram):
+    for i in range(len(gram)):
+        for j in range(i + 1, len(gram) + 1):
+            filler, slot_gram = gram[i:j], gram[:i] + ('_',) + gram[j:]
+            yield (filler, slot_gram)
+            for k in range(len(filler)):
+                for l in range(k + 1, len(filler) + min(1, k)):
+                    star_filler = filler[:k] + ('+',) + filler[l:]
+                    yield (star_filler, slot_gram)
+            
+
+def tails(sentence):
+    return [tuple(sentence[i:]) for i in range(len(sentence))]
+
+def inits(sentence):
+    return [tuple(sentence[:len(sentence)-i]) for i in range(len(sentence))]
+
+def arb_ctxt_dy(corpus):
+    grams = [tail for sentence in corpus for tail in tails(['<s>'] + sentence + ['</s>'])]
+    grams_rev = [tuple(reversed(init)) for sentence in corpus for init in inits(['<s>'] + sentence + ['</s>'])]
+    cdy = {}
+    cdy['fw'] = arb_ctxt_dy_aux(grams)
+    cdy['bw'] = arb_ctxt_dy_aux(grams_rev)
+    return cdy
+
+def arb_ctxt_dy_aux(grams):
+    # End recursion at unigrams, just return dict with counts
+    if set(grams) == {()}:
+        return {'#': len(grams)}
+    # Sort tails of ngrams according to head word
+    tail_dict = defaultdict(list)
+    for gram in grams:
+        tail_dict[gram[:1]].append(gram[1:])
+    # Recursively compute context dict for each head word
+    cdy = {head: arb_ctxt_dy_aux(tails) for head, tails in tail_dict.items()}
+    cdy['#'] = len(grams)
+    return cdy
 
 def ctxt_dy(corpus, n):
     ngrams = [x for sentence in corpus for x in ngrams_list(sentence, n)]
@@ -36,67 +301,9 @@ def ctxt_dy_aux(ngrams, n):
     cdy['#'] = sum(cdy[word]['#'] for word in cdy)
     return cdy
 
-def envr_dy(corpus, n):
-    ngrams = [x for sentence in corpus for x in ngrams_list(sentence, n)]
-    edy = {'ctxts': defaultdict(dict), 'argts': defaultdict(dict)}
-    for ngram in ngrams:
-        while len(ngram) >= 3:
-            try:
-                edy['argts'][ngram[1:-1]][ngram[:1] + ngram[-1:]] += 1
-            except:
-                edy['argts'][ngram[1:-1]][ngram[:1] + ngram[-1:]]  = 1
-            try:
-                edy['ctxts'][ngram[:1] + ngram[-1:]][ngram[1:-1]] += 1
-            except:
-                edy['ctxts'][ngram[:1] + ngram[-1:]][ngram[1:-1]]  = 1
-            ngram = ngram[:-1]
-    for dr in edy:
-        for item in edy[dr]:
-            count = sum(edy[dr][item].values())
-            edy[dr][item]['#'] = count
-    return edy
-
 # -----
 # Neighbour searching algorithms
 # -----
-
-def envr_sims(refr, edy):
-    sims = defaultdict(float)
-    for ctxt in edy['argts'][refr]:
-        if ctxt == '#': continue
-        bw_step = edy['argts'][refr][ctxt] / edy['argts'][refr]['#']
-        for argt in edy['ctxts'][ctxt]:
-            if argt == '#': continue
-            fw_step = edy['ctxts'][ctxt][argt] / edy['ctxts'][ctxt]['#']
-            sims[argt] += bw_step * fw_step
-    return sorted(list(sims.items()), reverse=True, key=lambda x: x[1])
-
-def cmn_envrs(refr, targ, edy):
-    envrs = set()
-    for bw_ctxt in edy[refr]:
-        if bw_ctxt in edy[targ]:
-            for fw_ctxt in edy[refr][bw_ctxt]:
-                if fw_ctxt in edy[targ][bw_ctxt]:
-                    envrs.add((bw_ctxt[0], fw_ctxt[0]))
-    return envrs
-
-def cmn_paths(refr, targ, cdy):
-    anl_ctxt, anl_goal = (refr[0],), (refr[1],)
-    ctxt,     goal     = (targ[0],), (targ[1],)
-    score = 0
-    paths = []
-    for r_item in cmn_fw_nbs(ctxt, anl_ctxt, cdy):
-        bw_step = prob_bw(ctxt, r_item, cdy) * prob_bw(anl_ctxt, r_item, cdy)
-        for l_item in cmn_bw_nbs(goal, anl_goal, cdy):
-            try:
-                bridge = prob_jt(l_item, r_item, cdy)
-                fw_step = prob_fw(l_item, goal, cdy) * prob_fw(l_item, anl_goal, cdy)
-                score += bw_step * bridge * fw_step
-                paths.append((l_item + r_item, score))
-            except:
-                continue
-    print(score)
-    return sorted(paths, key=lambda x: x[1], reverse=True)
 
 def fw_count(ngram, cdy):
     rem_dy = cdy['fw']
@@ -210,16 +417,6 @@ def cmn_bw_nbs_aux(rem_dy1, rem_dy2, n, path=()):
             path = path[:-1]
     return nbs
 
-def cmn_ctxts(ngram1, ngram2, cdy):
-    ctxts = []
-    for bw_nb in cmn_bw_nbs(ngram1, ngram2, cdy):
-        try:
-            for fw_nb in cmn_fw_nbs(bw_nb + ngram1, bw_nb + ngram2, cdy):
-                ctxts.append((bw_nb, fw_nb))
-        except:
-            continue
-    return ctxts
-
 def prob_fw(ngram1, ngram2, cdy):
     return fw_count(ngram1 + ngram2, cdy) / fw_count(ngram1, cdy)
     
@@ -244,45 +441,6 @@ def nb_gen(srce, trgt, cdy):
             continue
     return math.sqrt(bw_score * fw_score)
 
-def cos_sim(refr, targ, cdy):
-    bw_num = 0
-    bw_ref = 0
-    bw_trg = 0
-    for bwnb in cdy['fw']:
-        if bwnb == '#':
-            continue
-        try:
-            refr_count = fw_lookup((bwnb,) + refr, cdy)['#']
-        except:
-            refr_count = 0
-        try:
-            targ_count = fw_lookup((bwnb,) + targ, cdy)['#']
-        except:
-            targ_count = 0
-        bw_num += refr_count * targ_count
-        bw_ref += refr_count ** 2
-        bw_trg += targ_count ** 2
-    bw_sim = bw_num / (math.sqrt(bw_ref) * math.sqrt(bw_trg))
-    fw_num = 0
-    fw_ref = 0
-    fw_trg = 0
-    for fwnb in cdy['bw']:
-        if fwnb == '#':
-            continue
-        try:
-            refr_count = bw_lookup(refr + (fwnb,), cdy)['#']
-        except:
-            refr_count = 0
-        try:
-            targ_count = bw_lookup(targ + (fwnb,), cdy)['#']
-        except:
-            targ_count = 0
-        fw_num += refr_count * targ_count
-        fw_ref += refr_count ** 2
-        fw_trg += targ_count ** 2
-    fw_sim = fw_num / (math.sqrt(fw_ref) * math.sqrt(fw_trg))
-    return math.sqrt(bw_sim * fw_sim)
-
 def fw_gen_prob(refr, targ, cdy):
     fw_prob = 0
     for fwnb in cmn_fw_nbs(refr, targ, cdy):
@@ -299,27 +457,99 @@ def bw_gen_prob(refr, targ, cdy):
         bw_prob += bw_num / bw_den
     return bw_prob
 
-def gen_prob_sep(refr, targ, cdy):
+def gen_prob(refr, targ, cdy):
+    return bw_gen_prob(refr, targ, cdy) * fw_gen_prob(refr, targ, cdy)
+
+def gen_sims(targ, cdy):
+    fw_sims = defaultdict(float)
+    for fwnb in fw_nbs(targ, cdy):
+        for refr in bw_nbs(fwnb, cdy, len(targ)):
+            fw_sims[refr] += prob_bw(targ, fwnb, cdy) * prob_fw(refr, fwnb, cdy)
+    bw_sims = defaultdict(float)
+    for bwnb in bw_nbs(targ, cdy):
+        for refr in fw_nbs(bwnb, cdy, len(targ)):
+            bw_sims[refr] += prob_fw(bwnb, targ, cdy) * prob_bw(bwnb, refr, cdy)
+    sims = {}
+    for fw_sim in fw_sims:
+        sims[fw_sim] = min(fw_sims[fw_sim], bw_sims[fw_sim])
+    return sorted(list(sims.items()), key=lambda x: x[1], reverse=True)
+    
+
+def fw_gen_prob_sep(refr, targ, cdy):
     fw_num = 0
     fw_den = 0
     for fwnb in cmn_fw_nbs(refr, targ, cdy):
         fw_num += fw_count(refr + fwnb, cdy) * fw_count(targ + fwnb, cdy)
         fw_den += fw_count(refr + fwnb, cdy) * bw_count(fwnb, cdy)
-    fw_prob = fw_num / fw_den
+    return fw_num / fw_den
+    
+def bw_gen_prob_sep(refr, targ, cdy):
     bw_num = 0
     bw_den = 0
     for bwnb in cmn_bw_nbs(refr, targ, cdy):
         bw_num += bw_count(bwnb + refr, cdy) * bw_count(bwnb + targ, cdy)
         bw_den += bw_count(bwnb + refr, cdy) * fw_count(bwnb, cdy)
-    bw_prob = bw_num / bw_den
-    return fw_prob * bw_prob
+    return bw_num / bw_den
 
-def sims(gram, cdy):
-    
+def rel_grams(ctxt, goal, cdy):
+    paths = set()
+    for anl_goal in fw_nbs(ctxt, cdy, len(goal)):
+        for anl_ctxt in cmn_bw_nbs(anl_goal, goal, cdy, len(ctxt)):
+            paths.add((anl_ctxt, anl_goal))
+            paths.add((    ctxt, anl_goal))
+            paths.add((anl_ctxt,     goal))
+    relts = {}
+    for anl_ctxt, anl_goal in paths:
+        try:
+            relts[(anl_ctxt, anl_goal)] = min(gen_prob(anl_ctxt, ctxt, cdy),
+                                              gen_prob(anl_goal, goal, cdy))
+        except:
+            continue
+    return sorted(list(relts.items()), key=lambda x: x[1], reverse=True)
 
 # -----
 # Analogical path finding algorithms
 # -----
+
+def paths_split(ctxt, goal, cdy, n=float('inf')):
+    m_pairs = set()
+    ac_items = {ctxt}
+    ag_items = {goal}
+    for anl_goal in fw_nbs(ctxt, cdy, len(goal)):
+        for anl_ctxt in cmn_bw_nbs(anl_goal, goal, cdy, len(ctxt)):
+            ac_items.add(anl_ctxt)
+            ag_items.add(anl_goal)
+            m_pairs.add((anl_ctxt, anl_goal))
+            m_pairs.add((ctxt, anl_goal))
+            m_pairs.add((anl_ctxt, goal))
+    fw_acs = defaultdict(float)
+    bw_acs = defaultdict(float)
+    for anl_ctxt in ac_items:
+        try:
+            fw_acs[anl_ctxt] += fw_gen_prob(anl_ctxt, ctxt, cdy)
+        except:
+            pass
+        try:
+            bw_acs[anl_ctxt] += bw_gen_prob(anl_ctxt, ctxt, cdy)
+        except:
+            pass
+    fw_ags = defaultdict(float)
+    bw_ags = defaultdict(float)
+    for anl_goal in ag_items:
+        try:
+            fw_ags[anl_goal] += fw_gen_prob(anl_goal, goal, cdy)
+        except:
+            pass
+        try:
+            bw_ags[anl_goal] += bw_gen_prob(anl_goal, goal, cdy)
+        except:
+            pass
+    anls = []
+    for anl_ctxt, anl_goal in m_pairs:
+        ac_prob = (min(fw_acs[anl_ctxt], bw_acs[anl_ctxt]))
+        ag_prob = (min(fw_ags[anl_goal], bw_ags[anl_goal]))
+        anls.append(((anl_ctxt, anl_goal), min(ac_prob, ag_prob)))
+    return sorted(anls, key=lambda x: x[1], reverse=True)
 
 def mx_paths(ctxts, goals, cdy):
     m_pairs = set()
@@ -364,45 +594,24 @@ def mx_paths(ctxts, goals, cdy):
                 pass
     anls = []
     for anl_ctxt, anl_goal in m_pairs:
-        ac_prob = fw_acs[anl_ctxt] * bw_acs[anl_ctxt]
-        ag_prob = fw_ags[anl_goal] * bw_ags[anl_goal]
-        anls.append((anl_ctxt + anl_goal, ac_prob * ag_prob))
-    '''
-    for anl_ctxt, anl_goal in m_pairs:
-        ctxt_gen =   prob_fw(anl_ctxt, anl_goal, cdy) \
-                   * prob_bw(ctxt['item'], anl_goal, cdy)
-        acr_items[anl_ctxt] += ctxt_gen * ctxt['weight']
-        goal_gen =   prob_bw(anl_ctxt, anl_goal, cdy) \
-                   * prob_fw(anl_ctxt, goal['item'], cdy)
-        agl_items[anl_goal] += goal_gen * goal['weight']
-    acl_items = defaultdict(float)
-    for anl_ctxt in acr_items:
-        if anl_ctxt[0][:2] == '<s':
-            continue
-        for ctxt in ctxts:
-            for lft_envr in cmn_bw_nbs(ctxt['item'], anl_ctxt, cdy):
-                ll_prob =   prob_fw(lft_envr, ctxt['item'], cdy) \
-                          * prob_bw(lft_envr, anl_ctxt, cdy)
-                acl_items[anl_ctxt] += ll_prob * ctxt['weight']
-    agr_items = defaultdict(float)
-    for anl_goal in agl_items:
-        if anl_goal[-1][:2] == '</':
-            continue
-        for goal in goals:
-            for rgt_envr in cmn_fw_nbs(anl_goal, goal['item'], cdy):
-                rr_prob =   prob_fw(anl_goal, rgt_envr, cdy) \
-                          * prob_bw(goal['item'], rgt_envr, cdy)
-                agr_items[anl_goal] += rr_prob * goal['weight']
-    anls = []
-    for anl_ctxt, anl_goal in m_pairs:
-        if anl_ctxt[0][:2] == '<s' or anl_goal[-1][:2] == '</':
-            continue
-        ctxt_prob = acr_items[anl_ctxt] * acl_items[anl_ctxt]
-        goal_prob = agl_items[anl_goal] * agl_items[anl_goal]
-        jt_prob = ctxt_prob * goal_prob
-        anls.append((anl_ctxt + anl_goal, jt_prob))
-    '''
+        ac_prob = (min(fw_acs[anl_ctxt], bw_acs[anl_ctxt]))# * prob_jt(anl_ctxt, (), cdy)
+        ag_prob = (min(fw_ags[anl_goal], bw_ags[anl_goal]))# * prob_jt(anl_goal, (), cdy)
+        anls.append(((anl_ctxt, anl_goal), min(ac_prob, ag_prob)))
     return sorted(anls, key=lambda x: x[1], reverse=True)
+
+def gen_words(gram, cdy):
+    fw_gens = defaultdict(float)
+    for fwnb in fw_nbs(gram, cdy):
+        for bwnb in bw_nbs(fwnb, cdy, len(gram)):
+            fw_gens[bwnb] += prob_bw(gram, fwnb, cdy) * prob_fw(bwnb, fwnb, cdy)
+    bw_gens = defaultdict(float)
+    for bwnb in bw_nbs(gram, cdy):
+        for fwnb in fw_nbs(bwnb, cdy, len(gram)):
+            bw_gens[fwnb] += prob_fw(bwnb, gram, cdy) * prob_bw(bwnb, fwnb, cdy)
+    gens = []
+    for word in fw_gens:
+        gens.append((word, fw_gens[word] * bw_gens[word] * prob_jt(word, (), cdy)))
+    return sorted(gens, key=lambda x: x[1], reverse=True)
 
 def aps(ctxt, goal, cdy, n=float('inf')):
     rl_grams = defaultdict(float)
@@ -452,166 +661,9 @@ def aps(ctxt, goal, cdy, n=float('inf')):
             anls[(anl_ctxt + anl_goal)] += j_prob
     return sorted(list(anls.items()), key=lambda x: x[1], reverse=True)
 
-def aps2(ctxt, goal, cdy, n=float('inf')):
-    l_grams = defaultdict(float)
-    r_grams = defaultdict(float)
-    m_set = set()
-    l_set = set()
-    r_set = set()
-    for anl_goal in fw_nbs(ctxt, cdy, len(goal)):
-        for anl_ctxt in cmn_bw_nbs(anl_goal, goal, cdy, len(ctxt)):
-            m_set.add((anl_ctxt, anl_goal))
-            l_set.add(anl_ctxt)
-            r_set.add(anl_goal)
-    for l_gram in l_set:
-        l_grams[l_gram] = nb_gen(l_gram, ctxt, cdy)
-    for r_gram in r_set:
-        r_grams[r_gram] = nb_gen(r_gram, goal, cdy)
-    anls = defaultdict(float)
-    for anl_ctxt, anl_goal in m_set:
-        l_prob = l_grams[anl_ctxt]# * prob_jt(anl_ctxt, goal, cdy)
-        r_prob = r_grams[anl_goal]# * prob_jt(ctxt, anl_goal, cdy)
-        j_prob = r_prob * l_prob# * prob_jt(anl_ctxt, anl_goal, cdy)
-        if len(ctxt + anl_goal)     < n:
-            anls[(ctxt + anl_goal)]     += r_prob
-        if len(anl_ctxt + goal)     < n:
-            anls[(anl_ctxt + goal)]     += l_prob
-        if len(anl_ctxt + anl_goal) < n:
-            anls[(anl_ctxt + anl_goal)] += j_prob
-    return sorted(list(anls.items()), key=lambda x: x[1], reverse=True)
-
-def aps2_split(ctxt, goal, cdy, n=float('inf')):
-    l_grams = defaultdict(float)
-    r_grams = defaultdict(float)
-    m_set = set()
-    l_set = set()
-    r_set = set()
-    for anl_goal in fw_nbs(ctxt, cdy, len(goal)):
-        for anl_ctxt in cmn_bw_nbs(anl_goal, goal, cdy, len(ctxt)):
-            m_set.add((anl_ctxt, anl_goal))
-            l_set.add(anl_ctxt)
-            r_set.add(anl_goal)
-    for l_gram in l_set:
-        l_grams[l_gram] = nb_gen(l_gram, ctxt, cdy)
-    for r_gram in r_set:
-        r_grams[r_gram] = nb_gen(r_gram, goal, cdy)
-    anls = defaultdict(float)
-    for anl_ctxt, anl_goal in m_set:
-        l_prob = l_grams[anl_ctxt]
-        r_prob = r_grams[anl_goal]
-        j_prob = r_prob * l_prob
-        if len(ctxt + anl_goal)     < n:
-            anls[(ctxt, anl_goal)]     += r_prob
-        if len(anl_ctxt + goal)     < n:
-            anls[(anl_ctxt, goal)]     += l_prob
-        if len(anl_ctxt + anl_goal) < n:
-            anls[(anl_ctxt, anl_goal)] += j_prob
-    return sorted(list(anls.items()), key=lambda x: x[1], reverse=True)
-
 # -----
 # Recursive parsing algorithms
 # -----
-
-def rec_parse(gram, cdy, anl_dy=None, n=float('inf')):
-    # Use empty dict as default value for argument `anl_dy`
-    if anl_dy == None:
-        anl_dy = {}
-    # Attempt dynamic lookup
-    try:
-        return (anl_dy, anl_dy[gram])
-    except KeyError:
-        pass
-    # End recursion when we reach unigrams
-    if len(gram) == 1:
-        anl_dy[gram] = [((gram, gram), 1)]
-        return (anl_dy, [((gram, gram), 1)])
-    # Recursive step
-    splits = ((gram[:i], gram[i:]) for i in range(1,len(gram)))
-    split_anls = {}
-    anl_path_dy = defaultdict(float)
-    for ctxt, goal in splits:
-        split_anls[(ctxt, goal)] = defaultdict(float)
-        # Recursive calls
-        ctxt_subs = rec_parse(ctxt, cdy, anl_dy, n)[1]
-        goal_subs = rec_parse(goal, cdy, anl_dy, n)[1]
-        for ctxt_sub, ctxt_score in ctxt_subs:
-            for goal_sub, goal_score in goal_subs:
-                paths = aps(ctxt_sub[0], goal_sub[0], cdy, n)[:10]
-                for path, path_score in paths:
-                    score = path_score * ctxt_score * goal_score
-                    split_anls[(ctxt, goal)][path] += score
-                    anl_path_dy[(path, (ctxt, goal))] += score
-    anls = sorted(list(anl_path_dy.items()), key=lambda x: x[1], reverse=True)[:10]
-    anl_dy[gram] = anls
-    return (anl_dy, anls)
-
-
-def rec_parse2(gram, cdy, anl_dy=None, n=float('inf')):
-    # Use empty dict as default value for argument `anl_dy`
-    if anl_dy == None:
-        anl_dy = {}
-    # Attempt dynamic lookup
-    if gram in anl_dy:
-        return anl_dy
-    # End recursion when we reach unigrams
-    if len(gram) == 1:
-        anls = [{'path': gram, 'score': 1, 'split': gram[0], 'subst': gram[0]}]
-        anl_dy[gram] = anls
-        return anl_dy
-    # Recursive step
-    splits = ((gram[:i], gram[i:]) for i in range(1,len(gram)))
-    anls = []
-    for ctxt, goal in splits:
-        split_dy = defaultdict(float)
-        # Recursive calls
-        rec_ctxts = rec_parse2(ctxt, cdy, anl_dy, n)[ctxt][:30]
-        rec_goals = rec_parse2(goal, cdy, anl_dy, n)[goal][:30]
-        for rec_ctxt in rec_ctxts:
-            for rec_goal in rec_goals:
-                paths = aps(rec_ctxt['path'], rec_goal['path'], cdy, n)[:30]
-                for path, path_score in paths:
-                    score = path_score * rec_ctxt['score'] * rec_goal['score']
-                    split = (rec_ctxt['split'], rec_goal['split'])
-                    subst = (rec_ctxt['path'], rec_goal['path'])
-                    anls.append({'path': path, 'score': score,
-                                 'split': split, 'subst': subst})
-    anls.sort(reverse=True, key=lambda x: x['score'])
-    anl_dy[gram] = anls
-    return anl_dy
-
-def rec_parse3(gram, cdy, anl_dy=None, n=float('inf')):
-    # Use empty dict as default value for argument `anl_dy`
-    if anl_dy == None:
-        anl_dy = {}
-    # Attempt dynamic lookup
-    if gram in anl_dy:
-        return anl_dy
-    # End recursion when we reach unigrams
-    if len(gram) == 1:
-        anls = [{'path': gram, 'score': 1, 'split': gram[0]}]
-        anl_dy[gram] = anls
-        return anl_dy
-    # Recursive step
-    splits = ((gram[:i], gram[i:]) for i in range(1,len(gram)))
-    anls = []
-    for ctxt, goal in splits:
-        split_dy = defaultdict(float)
-        # Recursive calls
-        rec_ctxts = rec_parse3(ctxt, cdy, anl_dy, n)[ctxt][:30]
-        rec_goals = rec_parse3(goal, cdy, anl_dy, n)[goal][:30]
-        for rec_ctxt in rec_ctxts:
-            for rec_goal in rec_goals:
-                paths = aps(rec_ctxt['path'], rec_goal['path'], cdy, n)[:30]
-                for path, path_score in paths:
-                    score = path_score * rec_ctxt['score'] * rec_goal['score']
-                    split_dy[path] += score
-        split_score = sum(split_dy.values())
-        for path, score in split_dy.items():
-            anls.append({'path': path, 'score': score,
-                         'split': (ctxt, goal)})
-    anls.sort(reverse=True, key=lambda x: x['score'])
-    anl_dy[gram] = anls
-    return anl_dy
 
 def rec_parse_split(gram, cdy, anl_dy=None, n=float('inf')):
     # Use empty dict as default value for argument `anl_dy`
@@ -622,12 +674,20 @@ def rec_parse_split(gram, cdy, anl_dy=None, n=float('inf')):
         return anl_dy
     # End recursion when we reach unigrams
     if len(gram) == 1:
-        anls = [{'path': gram, 'score': 1, 'tree': gram[0], 'tree type': gram[0]}]
+        sims = gen_sims(gram, cdy)[:10]
+        #'''
+        anls = []
+        for sim, score in sims:
+            anl = {'path': sim, 'score': score, 'tree': sim[0], 'tree type': gram[0]}
+            anls.append(anl)
+        #'''
+        #anls = [{'path': gram, 'score': 1, 'tree': gram[0], 'tree type': gram[0]}]
         anl_dy[gram] = anls
         return anl_dy
     # Recursive step
     splits = ((gram[:i], gram[i:]) for i in range(1,len(gram)))
     anls = []
+    tt_dict = {}
     for ctxt, goal in splits:
         # Recursive calls
         rec_ctxts = rec_parse_split(ctxt, cdy, anl_dy, n)[ctxt][:10]
@@ -635,75 +695,19 @@ def rec_parse_split(gram, cdy, anl_dy=None, n=float('inf')):
         for rec_ctxt in rec_ctxts:
             for rec_goal in rec_goals:
                 tree_type = (rec_ctxt['tree type'], rec_goal['tree type'])
-                paths = aps2_split(rec_ctxt['path'], rec_goal['path'], cdy, n)[:30]
+                tt_dict[tree_type] = 0
+                paths = paths_split(rec_ctxt['path'], rec_goal['path'], cdy, n)[:30]
                 for path, path_score in paths:
                     score = path_score * rec_ctxt['score'] * rec_goal['score']
+                    tt_dict[tree_type] += score
                     tree = ((' '.join(path[0]), rec_ctxt['tree']),
                             (' '.join(path[1]), rec_goal['tree']))
                     anls.append({'path': path[0] + path[1], 'score': score,
                                  'tree': tree, 'tree type': tree_type})
+    for anl in anls:
+        anl['score'] = anl['score']# * tt_dict[anl['tree type']]
     anls.sort(reverse=True, key=lambda x: x['score'])
     anl_dy[gram] = anls
-    return anl_dy
-
-def rec_parse_tree(tree, cdy, anl_dy=None, n=float('inf')):
-    # Use empty dict as default value for argument `anl_dy`
-    if anl_dy == None:
-        anl_dy = {}
-    # Attempt dynamic lookup
-    if tree in anl_dy:
-        return anl_dy
-    # End recursion when we reach unigrams
-    if len(tree) == 1:
-        anls = [{'path': tree, 'score': 1, 'split': tree[0], 'subst': tree[0]}]
-        anl_dy[tree] = anls
-        return anl_dy
-    # Recursive step
-    ctxt, goal = tree[0], tree[1]
-    anls = []
-    # Recursive calls
-    rec_ctxts = rec_parse_tree(ctxt, cdy, anl_dy, n)[ctxt][:10]
-    rec_goals = rec_parse_tree(goal, cdy, anl_dy, n)[goal][:10]
-    for rec_ctxt in rec_ctxts:
-        for rec_goal in rec_goals:
-            paths = aps(rec_ctxt['path'], rec_goal['path'], cdy, n)[:20]
-            for path, path_score in paths:
-                score = path_score * rec_ctxt['score'] * rec_goal['score']
-                split = (rec_ctxt['split'], rec_goal['split'])
-                subst = (rec_ctxt['path'], rec_goal['path'])
-                anls.append({'path': path, 'score': score,
-                             'split': split, 'subst': subst})
-    anls.sort(reverse=True, key=lambda x: x['score'])
-    anl_dy[tree] = anls
-    return anl_dy
-
-def rec_parse_tree2(tree, cdy, anl_dy=None, n=float('inf')):
-    # Use empty dict as default value for argument `anl_dy`
-    if anl_dy == None:
-        anl_dy = {}
-    # Attempt dynamic lookup
-    if tree in anl_dy:
-        return anl_dy
-    # End recursion when we reach unigrams
-    if len(tree) == 1:
-        anls = [{'path': tree, 'score': 1}]
-        anl_dy[tree] = anls
-        return anl_dy
-    # Recursive step
-    ctxt, goal = tree[0], tree[1]
-    anls = defaultdict(float)
-    # Recursive calls
-    rec_ctxts = rec_parse_tree2(ctxt, cdy, anl_dy, n)[ctxt][:20]
-    rec_goals = rec_parse_tree2(goal, cdy, anl_dy, n)[goal][:20]
-    for rec_ctxt in rec_ctxts:
-        for rec_goal in rec_goals:
-            paths = aps(rec_ctxt['path'], rec_goal['path'], cdy, n)
-            for path, path_score in paths:
-                score = path_score * rec_ctxt['score'] * rec_goal['score']
-                anls[path] += score
-    anls = [{'path': path, 'score': anls[path]} for path in anls]
-    anls.sort(reverse=True, key=lambda x: x['score'])
-    anl_dy[tree] = anls
     return anl_dy
 
 # -----
