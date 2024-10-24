@@ -41,14 +41,14 @@ def ngrams_list(sentence, n):
     ends = [tuple(['<s0>'] + beg), tuple(end + ['</s{}>'.format(n)])]
     return list(zip(*(sentence[i:len(sentence)-n+i+1] for i in range(n)))) + ends
 
-def slot_ctxt_dy(corpus):
-    grams = [tuple(['<s>'] + sentence + ['</s>']) for sentence in corpus]
-    cdy = slot_ctxt_dy_aux_stars_ctxts(grams)
-    gdy = slot_ctxt_dy_aux_stars_goals(grams)
-    return (cdy, gdy)
-
 def nesting_dict():
     return defaultdict(nesting_dict)
+
+def slot_ctxt_dy(corpus):
+    grams = [tuple(['<s>'] + sentence + ['</s>']) for sentence in corpus]
+    #cdy = slot_ctxt_dy_aux_stars_ctxts(grams)
+    gdy = slot_ctxt_dy_aux_stars_goals(grams)
+    return gdy
 
 def slot_ctxt_dy_aux(grams):
     # Initialise context dictionary
@@ -103,14 +103,16 @@ def slot_ctxt_dy_aux_stars_ctxts(grams):
                 if head == '_':
                     fill = True
                 if head not in traversing_dict:
-                    traversing_dict[head] = {'$': nesting_dict()}
-                    traversing_dict[head]['$']['#'] = 0
+                    traversing_dict[head] = nesting_dict()
+                    traversing_dict[head]['#'] = 0
                 # If first time seeing this prefix in this gram, add count
                 # and filler
                 if path not in seen_slot_grams:
-                    traversing_dict[head]['$']['#'] += 1
+                    traversing_dict[head]['#'] += 1
                     seen_slot_grams.add(path)
                 if fill:
+                    if '$' not in traversing_dict[head]:
+                        traversing_dict[head]['$'] = nesting_dict()
                     # Record filler in nested dict for easier common-
                     # neighbour search
                     filler_dict = traversing_dict[head]['$']
@@ -131,37 +133,40 @@ def slot_ctxt_dy_aux_stars_goals(grams):
     ctxt_dict = nesting_dict()
     # Add new dictionary structure for each gram
     for gram in grams:
-        seen_slot_grams = set()
-        for filler, slot_grams in slot_plus_grams_goals(gram):
+        prefix_indices = set()
+        for i, j, filler in slot_plus_grams_goals(gram):
             traversing_dict = ctxt_dict
-            path = ()
-            for head in filler:
-                path += (head,)
-                if head not in traversing_dict:
-                    traversing_dict[head] = {'$': nesting_dict()}
-                    traversing_dict[head]['$']['#'] = 0
-                # If first time seeing this prefix in this gram, add count
-                # and filler
-                if path not in seen_slot_grams:
-                    traversing_dict[head]['$']['#'] += 1
-                    seen_slot_grams.add(path)
-                if path == filler:
-                    # Record filler in nested dict for easier common-
-                    # neighbour search
-                    slot_gram_dict = traversing_dict[head]['$']
-                    fill = False
-                    for slot_gram in slot_grams:
-                        for i, slot_gram_head in enumerate(slot_gram):
-                            if slot_gram_head == '_':
-                                fill = True
-                            if fill:
-                                try:
-                                    slot_gram_dict[slot_gram_head]['#'] += 1
-                                except TypeError:
-                                    slot_gram_dict[slot_gram_head]['#'] = 1
-                            slot_gram_dict = slot_gram_dict[slot_gram_head]
-                        slot_gram_dict = traversing_dict[head]['$']
-                traversing_dict = traversing_dict[head]
+            for item in filler:
+                traversing_dict = traversing_dict[item]
+            try:
+                traversing_dict['#'] += 1
+            except TypeError:
+                traversing_dict['#'] = 1
+            traversing_dict = traversing_dict['$']
+            # Record filler in nested dict for easier common-
+            # neighbour search
+            context_suffix = gram[j:]
+            context_prefixes = (gram[k:i] for k in range(i))
+            # For each tail of the context prefix, record context:
+            for k, context_prefix in enumerate(context_prefixes):
+                filler_dict = traversing_dict
+                for item in context_prefix:
+                    filler_dict = filler_dict[item]
+                # Add place-holder for filler if not yet accounted for:
+                filler_dict = filler_dict['_']
+                if (k, i, filler) not in prefix_indices:
+                    try:
+                        filler_dict['#'] += 1
+                    except TypeError:
+                        filler_dict['#'] = 1
+                    prefix_indices.add((k, i, filler))
+                # Add rest of context:
+                for item in context_suffix:
+                    filler_dict = filler_dict[item]
+                    try:
+                        filler_dict['#'] += 1
+                    except TypeError:
+                        filler_dict['#'] = 1
     return ctxt_dict
 
 def slot_plus_grams_ctxts(gram):
@@ -193,31 +198,39 @@ def slot_plus_grams_ctxts(gram):
     for slot_gram, fillers in slot_dict.items():
         yield (slot_gram, fillers)
 
-def slot_plus_grams_goals(gram):
-    slot_dict = defaultdict(list)
+def old(gram):
+    slot_dict = defaultdict(lambda: defaultdict(list))
     for i in range(len(gram)):
         for j in range(i + 1, min(len(gram) + 1, len(gram) + i)):
             slot_gram, filler = gram[:i] + ('_',) + gram[j:], gram[i:j]
-            if i > 0 and j < len(gram):
+            if i > 0:
                 fillers = [filler]
                 stop = i
             else:
-                if i == 0:
-                    fillers = tails(filler)
-                    stop = i + 1
-                if j == len(gram):
-                    fillers = inits(filler)
-                    stop = i
+                fillers = tails(filler)
+                stop = i + 1
             for k in range(stop):
                 slot_subgram = slot_gram[k:]
-                for filler in fillers:
-                    slot_dict[filler].append(slot_subgram)
-                    for l in range(len(filler)):
-                        for m in range(l + 1, min(len(filler) + 1, len(filler) + l)):
-                            plus_filler = filler[:l] + ('+',) + filler[m:]
-                            slot_dict[plus_filler].append(slot_subgram)
-    for filler, slot_grams in slot_dict.items():
-        yield (filler, slot_grams)
+                for subfiller in fillers:
+                    slot_dict[subfiller][slot_gram].append(slot_subgram)
+                    for l in range(len(subfiller)):
+                        for m in range(l + 1, min(len(subfiller) + 1, len(subfiller) + l)):
+                            plus_filler = subfiller[:l] + ('+',) + subfiller[m:]
+                            slot_dict[plus_filler][slot_gram].append(slot_subgram)
+    for filler, slot_gram_dict in slot_dict.items():
+        for subgrams in slot_gram_dict.values():
+            yield (filler, subgrams)
+
+def slot_plus_grams_goals(gram):
+    for i in range(len(gram)):
+        for j in range(i + 1, min(len(gram) + 1, len(gram) + i)):
+            filler, prefix, suffix = gram[i:j], gram[:i], gram[j:]
+            for m in range(i):
+                yield (i, j, filler)
+                for k in range(len(filler)):
+                    for l in range(k + 1, min(len(filler) + 1, len(filler) + k)):
+                        yield (i, j, filler[:k] + ('+',) + filler[l:])
+
 
 def slot_grams(gram):
     for i in range(len(gram)):
@@ -304,6 +317,56 @@ def ctxt_dy_aux(ngrams, n):
 # -----
 # Neighbour searching algorithms
 # -----
+
+def gram_lookup(gram, dy):
+    rem_dy = dy
+    for head in gram:
+        if head in rem_dy:
+            rem_dy = rem_dy[head]
+        else:
+            raise KeyError(str(gram) + ' not found in context dictionary.')
+    return rem_dy['$']
+
+def retrieve_fillers(slot_gram, cdy):
+    pass
+
+def cmn_fillers(slot_gram1, slot_gram2, cdy):
+    return cmn_fillers_aux(gram_lookup(slot_gram1, cdy), gram_lookup(slot_gram2, cdy))
+
+def cmn_fillers_aux(rem_dy1, rem_dy2, path=()):
+    filling_words1, filling_words2 = list(rem_dy1.keys()), list(rem_dy2.keys())
+    if filling_words1 == ['#'] or filling_words2 == ['#']:
+        return []
+    fillers = []
+    cmn_filling_words = filter(lambda x: x != '#' and x in filling_words2, filling_words1)
+    for word in cmn_filling_words:
+        path += (word,)
+        if '#' in rem_dy1[word].keys() and '#' in rem_dy2[word].keys():
+            fillers.append(path)
+        fillers += cmn_fillers_aux(rem_dy1[word], rem_dy2[word], path)
+        path = path[:-1]
+    return fillers
+
+def cmn_contexts(filler1, filler2, gdy):
+    return cmn_contexts_aux(gram_lookup(filler1, gdy), gram_lookup(filler2, gdy))
+
+def cmn_contexts_aux(rem_dy1, rem_dy2, path=(), fill=False):
+    context_words1, context_words2 = list(rem_dy1.keys()), list(rem_dy2.keys())
+    if context_words1 == ['#'] or context_words2 == ['#']:
+        return []
+    contexts = []
+    cmn_context_words = filter(lambda x: x != '#' and x in context_words2, context_words1)
+    for word in cmn_context_words:
+        path += (word,)
+        old_fill = fill
+        if word == '_':
+            fill = True
+        if fill and '#' in rem_dy1[word].keys() and '#' in rem_dy2[word].keys() and len(path) > 1:
+            contexts.append(path)
+        contexts += cmn_contexts_aux(rem_dy1[word], rem_dy2[word], path, fill)
+        path = path[:-1]
+        fill = old_fill
+    return contexts
 
 def fw_count(ngram, cdy):
     rem_dy = cdy['fw']
