@@ -1,3 +1,5 @@
+from enum import Enum, auto
+
 # Function implementation
 
 def slot_insert(cdy, sentence):
@@ -42,6 +44,13 @@ def slot_insert_aux(cdy, sentence, slotted=False, filler=None, count_slots=True)
 
 # Class implementation
 
+class SlotStatus(Enum):
+    UNSLOTTED = auto()
+    SLOTTING = auto()
+    PREFIX = auto()
+    INFIX = auto()
+    SUFFIX = auto()
+
 class ContextNode:
     def __init__(self):
         """Initialize a new node in the context trie.
@@ -55,8 +64,8 @@ class ContextNode:
         self.fillers = FillerTrieOfContext()   # Trie of grams that can fill this context
         self.count = 1      # Frequency counter for this context
         
-    def record_filler(self, filler):
-        self.fillers._record_filler_aux(self.fillers.root, filler)
+    def record_filler(self, filler, latifix):
+        self.fillers._record_filler_aux(self.fillers.root, filler, latifix)
 
 class ContextTrie:
     def __init__(self):
@@ -75,7 +84,7 @@ class ContextTrie:
         for i in range(1, len(sentence)):
             self._insert_context_aux(self.root, sentence[i:], counting=False)
     
-    def _insert_context_aux(self, current_node, sentence, counting, slotted=False, filler=None):
+    def _insert_context_aux(self, current_node, sentence, counting, starting=True, slot_status=SlotStatus.UNSLOTTED, filler=None):
         """Auxiliary method for slot_insert that handles the recursive insertion of contexts.
         
         Args:
@@ -86,12 +95,24 @@ class ContextTrie:
             count_slots (bool): Whether to count this context in frequency calculations
         """
         if sentence == ():
-            if slotted:
-                current_node.record_filler(filler)
+            if slot_status == SlotStatus.SUFFIX:
+                # Exactly these fillers are suffixes of sentence, indicate with
+                # "latifix" = either prefix or suffix, from Latin "latus" ~ "side"
+                current_node.record_filler(filler, latifix=True)
+            elif slot_status == SlotStatus.INFIX:
+                current_node.record_filler(filler, latifix=False)
+            elif slot_status == SlotStatus.PREFIX:
+                current_node.record_filler(tuple(reversed(filler)), latifix=True)
             return
-        
-        # Handle slot creation if slot hasn't yet been added
-        if not slotted:
+        if filler is not None and len(filler) > 5:
+            if slot_status == SlotStatus.INFIX:
+                current_node.record_filler(filler, latifix=False)
+            elif slot_status == SlotStatus.PREFIX:
+                current_node.record_filler(tuple(reversed(filler)), latifix=True)
+            return
+        # Handle slot creation if slot hasn't yet been added, unless it's a starting
+        # word of a suffix of the original sentence
+        if slot_status == SlotStatus.UNSLOTTED and (not starting or counting):
             try:
                 slot_node = current_node.children['_']
                 if counting:
@@ -100,18 +121,41 @@ class ContextTrie:
                 current_node.children['_'] = ContextNode()
                 slot_node = current_node.children['_']
             # Record all possible filler lengths
-            for i in range(1, len(sentence) + 1):
+            # When filler is not a suffix of original sentence, don't record it
+            # for slot node
+            slot_status = SlotStatus.SLOTTING if not starting else SlotStatus.PREFIX
+            for i in range(1, len(sentence)):
                 self._insert_context_aux(
                     slot_node,
                     sentence[i:],
                     counting,
-                    slotted=True,
+                    False,
+                    slot_status,
                     filler=sentence[:i],
                 )
+            # When filler is suffix of original sentence, record it even for slot node
+            self._insert_context_aux(
+                slot_node,
+                (),
+                counting,
+                False,
+                SlotStatus.SUFFIX,
+                filler=sentence
+            )
+            slot_status = SlotStatus.UNSLOTTED
         
-        # Record fillers if a slot has already been added
-        elif slotted:
-            current_node.record_filler(filler)
+        # Record filler if a slot has already been added
+        elif slot_status == SlotStatus.INFIX:
+            # Non-prefix and non-suffix fillers
+            current_node.record_filler(filler, latifix=False)
+        
+        elif slot_status == SlotStatus.PREFIX:
+            # Exactly these fillers are prefixes, so record it in reverse
+            current_node.record_filler(tuple(reversed(filler)), latifix=True)
+        
+        # If this is a slot node, don't record filler, just set to slotted
+        elif slot_status == SlotStatus.SLOTTING:
+            slot_status = SlotStatus.INFIX
         
         # Continue building the trie with the next word
         next_word = sentence[0]
@@ -128,20 +172,32 @@ class ContextTrie:
             next_node,
             sentence[1:],
             counting,
-            slotted,
+            False,
+            slot_status,
             filler,
         )
-        
+    
+    def get_fillers(self, context):
+        """Get the list of grams that have occurred in this context."""
+        filler_trie = self._get_context_node(context).fillers
+        return filler_trie._get_fillers_aux(filler_trie.root)
+    
     def _get_context_node(self, context):
         current_node = self.root
         for word in context:
             current_node = current_node.children[word]
         return current_node
     
-    def get_fillers(self, context):
-        """Get the list of grams that have occurred in this context."""
-        filler_trie = self._get_context_node(context).fillers
-        return filler_trie._get_fillers_aux(filler_trie.root)
+    def common_fillers(self, context1, context2):
+        context_node1 = self._get_context_node(context1)
+        context_node2 = self._get_context_node(context2)
+        return self._common_fillers_aux(context_node1, context_node2)
+    
+    def _common_fillers_aux(self, current_node1, current_node2):
+        if current_node1.children == {} or current_node2.children == {}:
+            return []
+        common_
+        for word in filter(current_node1.children, lambda x: x in current_node2.children):
             
             
 
@@ -154,18 +210,20 @@ class FillerTrieOfContext:
     def __init__(self):
         self.root = FillerNodeOfContext()
     
-    def _record_filler_aux(self, current_node, filler):
+    def _record_filler_aux(self, current_node, filler, latifix):
         if filler == ():
             current_node.count += 1
             return
+        if latifix:
+            current_node.count += 1
         try:
             child_node = current_node.children[filler[0]]
-            self._record_filler_aux(child_node, filler[1:])
+            self._record_filler_aux(child_node, filler[1:], latifix)
         except KeyError:
             current_node.children[filler[0]] = FillerNodeOfContext()
             child_node = current_node.children[filler[0]]
-            self._record_filler_aux(child_node, filler[1:])
-    
+            self._record_filler_aux(child_node, filler[1:], latifix)
+
     def _get_fillers_aux(self, current_node, path=()):
         if current_node.children == {}:
             return []
