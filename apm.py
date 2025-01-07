@@ -1,6 +1,23 @@
 from enum import Enum, auto
+from collections import defaultdict
 
 # Function implementation
+
+# Import a txt file (containing one sentence per line) as a list whose each
+# element is a list of words corresponding to a line in the txt file:
+def txt2list(filename):
+    """Import a txt list of sentences as a list of lists of words.
+
+    Argument:
+        - filename (string), e.g.: 'grimm_corpus.txt'
+
+    Returns:
+        - list (of lists of strings), e.g.:
+          [['my', 'name', 'is', 'jolán'], ['i', 'am', 'cool'], ..., ['bye']]
+    """
+    with open(filename, mode='r', encoding='utf-8-sig') as file:
+        lines = file.readlines()
+    return [tuple(line.strip().split()) for line in lines]
 
 def slot_insert(cdy, sentence):
     slot_insert_aux(cdy, sentence)
@@ -60,9 +77,10 @@ class ContextNode:
             fillers (list): List of word sequences that can fill this context
             count (int): Number of times this context has been seen
         """
-        self.children = {}  # Maps words to child nodes
-        self.fillers = FillerTrieOfContext()   # Trie of grams that can fill this context
-        self.count = 1      # Frequency counter for this context
+        self.children = defaultdict(ContextNode)  # Maps words to child nodes
+        self.fillers = defaultdict(int)
+        #self.fillers = FillerTrieOfContext()   # Trie of grams that can fill this context
+        self.count = 0      # Frequency counter for this context
         
     def record_filler(self, filler, latifix):
         self.fillers._record_filler_aux(self.fillers.root, filler, latifix)
@@ -72,19 +90,38 @@ class ContextTrie:
         """Initialize an empty context trie."""
         self.root = ContextNode()
     
+    def record_sentence_contexts(self, sentence):
+        for i in reversed(range(len(sentence))):
+            suffix_node = ContextNode()
+            suffix_node.count += 1
+            # Insert slot for each filler starting from i
+            for j in range(i, len(sentence)+1):
+                filler = sentence[i:j]
+                current_node = suffix_node.children['_']
+                for word in sentence[j:]:
+                    current_node.fillers[filler] += 1
+                    current_node.count += 1
+                    current_node = current_node.children[word]
+            # Don't insert slot at i, dynamically lookup suffix trie from i+1
+            suffix_node.children[sentence[i]] = dynamic_lookup_table[i+1]
+            dynamic_lookup_table[i] = suffix_node
+            pass
+        
+                
+    
     def insert_context(self, sentence):
-        """Insert a sentence into the context trie, recording all possible contexts.
+        """Insert a sentence into these context trie, recording all possible contexts.
         
         Args:
             sentence (tuple): A tuple of words representing the sentence
         """
         # Insert the full sentence
-        self._insert_context_aux(self.root, sentence, counting=True)
+        self._insert_context_aux(self.root, sentence)
         # Insert all suffixes of the sentence (starting from index 1)
         for i in range(1, len(sentence)):
-            self._insert_context_aux(self.root, sentence[i:], counting=False)
+            self._insert_context_aux(self.root, sentence[i:])
     
-    def _insert_context_aux(self, current_node, sentence, counting, starting=True, slot_status=SlotStatus.UNSLOTTED, filler=None):
+    def _insert_context_aux(self, current_node, sentence, starting=True, slot_status=SlotStatus.UNSLOTTED, filler=None):
         """Auxiliary method for slot_insert that handles the recursive insertion of contexts.
         
         Args:
@@ -161,8 +198,7 @@ class ContextTrie:
         next_word = sentence[0]
         try:
             next_node = current_node.children[next_word]
-            if counting:
-                next_node.count += 1
+            next_node.count += 1
         except:
             current_node.children[next_word] = ContextNode()
             next_node = current_node.children[next_word]
@@ -198,7 +234,7 @@ class ContextTrie:
             return []
         common_
         for word in filter(current_node1.children, lambda x: x in current_node2.children):
-            
+            pass
             
 
 class FillerNodeOfContext:
@@ -216,7 +252,7 @@ class FillerTrieOfContext:
             return
         if latifix:
             current_node.count += 1
-        try:
+        try:],
             child_node = current_node.children[filler[0]]
             self._record_filler_aux(child_node, filler[1:], latifix)
         except KeyError:
