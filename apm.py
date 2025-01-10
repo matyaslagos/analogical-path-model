@@ -1,5 +1,7 @@
 from enum import Enum, auto
 from collections import defaultdict
+from copy import deepcopy
+from pprint import pp
 
 # Function implementation
 
@@ -61,6 +63,13 @@ def slot_insert_aux(cdy, sentence, slotted=False, filler=None, count_slots=True)
 
 # Class implementation
 
+def test():
+    sentence = ('a', 'certain', 'king', 'had', 'a', 'beautiful', 'garden')
+    cdy = ContextTrie()
+    cdy.record_contexts(sentence)
+    pp(cdy.get_fillers2('a _ garden'))
+    return cdy
+
 class SlotStatus(Enum):
     UNSLOTTED = auto()
     SLOTTING = auto()
@@ -69,7 +78,7 @@ class SlotStatus(Enum):
     SUFFIX = auto()
 
 class ContextNode:
-    def __init__(self):
+    def __init__(self, label):
         """Initialize a new node in the context trie.
         
         Attributes:
@@ -81,33 +90,125 @@ class ContextNode:
         self.fillers = defaultdict(int)
         #self.fillers = FillerTrieOfContext()   # Trie of grams that can fill this context
         self.count = 0      # Frequency counter for this context
+        self.label = label
         
     def record_filler(self, filler, latifix):
         self.fillers._record_filler_aux(self.fillers.root, filler, latifix)
+    
+    def rec_trie_merge(self, added):
+        self.count += 1
+        for filler in added.fillers:
+            self.fillers[filler] += 1
+        for child in added.children:
+            if child not in self.children:
+                self.children[child] = added.children[child]
+            else:
+                self.children[child].rec_trie_merge(added.children[child])
 
 class ContextTrie:
     def __init__(self):
         """Initialize an empty context trie."""
-        self.root = ContextNode()
+        self.root = ContextNode('~')
     
-    def record_sentence_contexts(self, sentence):
+    def get_fillers2(self, context_string):
+        context = tuple(context_string.split())
+        current_node = self.root
+        for word in context:
+            if word in current_node.children:
+                current_node = current_node.children[word]
+            else:
+                return
+        return current_node.fillers
+    
+    def get_node(self, string):
+        sequence = tuple(string.split())
+        current_node = self.root
+        for word in sequence:
+            if word in current_node.children:
+                current_node = current_node.children[word]
+            else:
+                return
+        return current_node
+    
+    def record_contexts(self, sentence):
+        suffix_tries = self.suffix_tries(sentence).values()
+        for suffix_trie in suffix_tries:
+            self.rec_merge(self.root, suffix_trie.root)
+    
+    def dyn_record_contexts(self, sentence):
+        prev_children = defaultdict(ContextNode)
+        suffixes = (sentence[i:] for i in reversed(range(len(sentence))))
+        for suffix in suffixes:
+            suffix_trie = ContextTrie()
+            # Case where first word of suffix is not in slot:
+            # just attach previous trie
+            nonslot_node = ContextNode(suffix[0])
+            nonslot_node.count += 1
+            nonslot_node.children = prev_children
+            suffix_trie.root.children[suffix[0]] = nonslot_node
+            # Case where first word of suffix is in slot:
+            # make trie for each possible (filler, right context) pair
+            slot_node = ContextNode('_')
+            slot_node.count += 1
+            filler_right_context_pairs = (
+                (suffix[:j], suffix[j:])         # (filler, right context)
+                for j in range(1, len(suffix)+1) # for all possible fillers
+            )
+            for filler, right_context in filler_right_context_pairs:
+                slot_node.fillers[filler] += 1
+                curr_node = slot_node
+                for word in right_context:
+                    if word not in curr_node.children:
+                        new_node = ContextNode(word)
+                        curr_node.children[word] = new_node
+                    curr_node = curr_node.children[word]
+                    curr_node.fillers[filler] += 1
+            suffix_trie.root.children['_'] = slot_node
+            self.rec_merge(self.root, suffix_trie.root)
+            prev_children = deepcopy(suffix_trie.root.children)
+    
+    def rec_merge(self, original_node, new_node):
+        original_node.count += 1
+        for filler in new_node.fillers:
+            original_node.fillers[filler] += 1
+        for word, new_child_node in new_node.children.items():
+            if word in original_node.children:
+                self.rec_merge(original_node.children[word], new_child_node)
+            else:
+                original_node.children[word] = new_child_node
+                original_node.children[word].count += 1
+    
+    def suffix_tries(self, sentence):
+        suffix_trie_lookup_dict = {len(sentence): ContextTrie()}
         for i in reversed(range(len(sentence))):
-            suffix_node = ContextNode()
-            suffix_node.count += 1
-            # Insert slot for each filler starting from i
-            for j in range(i, len(sentence)+1):
-                filler = sentence[i:j]
-                current_node = suffix_node.children['_']
-                for word in sentence[j:]:
-                    current_node.fillers[filler] += 1
-                    current_node.count += 1
-                    current_node = current_node.children[word]
-            # Don't insert slot at i, dynamically lookup suffix trie from i+1
-            suffix_node.children[sentence[i]] = dynamic_lookup_table[i+1]
-            dynamic_lookup_table[i] = suffix_node
-            pass
-        
-                
+            suffix_trie = ContextTrie()
+            # Case where first word of suffix is not in slot:
+            # just attach previous trie
+            nonslot_node = ContextNode(sentence[i])
+            nonslot_node.count += 1
+            nonslot_node.children = deepcopy(suffix_trie_lookup_dict[i+1].root.children)
+            suffix_trie.root.children[sentence[i]] = nonslot_node
+            # Case where first word of suffix is in slot:
+            # make trie for each possible (filler, right context) pair
+            slot_node = ContextNode('_')
+            slot_node.count += 1
+            filler_right_context_pairs = (
+                (sentence[i:j], sentence[j:])        # (filler, right context)
+                for j in range(i+1, len(sentence)+1) # for all possible fillers
+            )
+            for filler, right_context in filler_right_context_pairs:
+                slot_node.fillers[filler] += 1
+                curr_node = slot_node
+                for word in right_context:
+                    if word not in curr_node.children:
+                        new_node = ContextNode(word)
+                        curr_node.children[word] = new_node
+                    curr_node = curr_node.children[word]
+                    curr_node.fillers[filler] += 1
+            suffix_trie.root.children['_'] = slot_node
+            suffix_trie_lookup_dict[i] = suffix_trie
+        del suffix_trie_lookup_dict[len(sentence)]
+        return suffix_trie_lookup_dict
     
     def insert_context(self, sentence):
         """Insert a sentence into these context trie, recording all possible contexts.
@@ -252,7 +353,7 @@ class FillerTrieOfContext:
             return
         if latifix:
             current_node.count += 1
-        try:],
+        try:
             child_node = current_node.children[filler[0]]
             self._record_filler_aux(child_node, filler[1:], latifix)
         except KeyError:
