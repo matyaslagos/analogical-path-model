@@ -1,5 +1,5 @@
 from enum import Enum, auto
-from collections import defaultdict
+from collections import defaultdict, namedtuple
 from copy import deepcopy
 from pprint import pp
 
@@ -77,6 +77,82 @@ class SlotStatus(Enum):
     INFIX = auto()
     SUFFIX = auto()
 
+class FreqNode:
+    def __init__(self, label):
+        self.label = label
+        self.children = defaultdict(FreqNode)
+        self.count = 0
+
+class FreqTrie:
+    def __init__(self):
+        self.root = FreqNode('~')
+
+class FillerNode:
+    def __init__(self, label):
+        self.label = label
+        self.children = defaultdict(FillerNode)
+        self.contexts = FreqTrie()
+        self.count = 0
+
+class FillerTrie:
+    def __init__(self):
+        self.root = FillerNode('~')
+    
+    def get_node(self, string):
+        sequence = tuple(string.split())
+        current_node = self.root
+        for word in sequence:
+            if word in current_node.children:
+                current_node = current_node.children[word]
+            else:
+                return
+        return current_node
+    
+    def record_fillers(self, sentence):
+        filler_context_pairs = (
+            (sentence[i:j], (sentence[:i], sentence[j:]))
+            for i in range(len(sentence))
+            for j in range(i+1, len(sentence)+1)
+        )
+        for filler, context in filler_context_pairs:
+            left_context, right_context = context
+            filler_node = self.root
+            # Make branch for filler
+            for word in filler:
+                if word not in filler_node.children.keys():
+                    new_node = FillerNode(word)
+                    filler_node.children[word] = new_node
+                filler_node = filler_node.children[word]
+            filler_node.count += 1
+            context_node = filler_node.contexts.root
+            self.rec_add_context(context_node, reversed(left_context), right_context)
+    
+    def rec_add_context(self, context_node, rev_left_context, right_context):
+        context_node.count += 1
+        try:
+            word = next(rev_left_context)
+        except:
+            return
+        # (1) Non-slot node: continue adding left context
+        if word not in context_node.children.keys():
+            new_node = FreqNode(word)
+            context_node.children[word] = new_node
+        # Recursive call
+        self.rec_add_context(context_node.children[word], rev_left_context, right_context)
+        # (2) Slot node: record slot node and right context
+        if '_' not in context_node.children.keys():
+            new_node = FreqNode('_')
+            context_node.children['_'] = new_node
+        context_node = context_node.children['_']
+        context_node.count += 1
+        # Record right context
+        for word in right_context:
+            if word not in context_node.children.keys():
+                new_node = FreqNode(word)
+                context_node.children[word] = new_node
+            context_node = context_node.children[word]
+            context_node.count += 1
+        
 class ContextNode:
     def __init__(self, label):
         """Initialize a new node in the context trie.
@@ -86,39 +162,18 @@ class ContextNode:
             fillers (list): List of word sequences that can fill this context
             count (int): Number of times this context has been seen
         """
-        self.children = defaultdict(ContextNode)  # Maps words to child nodes
-        self.fillers = defaultdict(int)
-        #self.fillers = FillerTrieOfContext()   # Trie of grams that can fill this context
-        self.count = 0      # Frequency counter for this context
         self.label = label
+        self.children = defaultdict(ContextNode)  # Maps words to child nodes
+        self.fillers = FreqTrie()
+        self.count = 0      # Frequency counter for this context
         
     def record_filler(self, filler, latifix):
         self.fillers._record_filler_aux(self.fillers.root, filler, latifix)
-    
-    def rec_trie_merge(self, added):
-        self.count += 1
-        for filler in added.fillers:
-            self.fillers[filler] += 1
-        for child in added.children:
-            if child not in self.children:
-                self.children[child] = added.children[child]
-            else:
-                self.children[child].rec_trie_merge(added.children[child])
 
 class ContextTrie:
     def __init__(self):
         """Initialize an empty context trie."""
         self.root = ContextNode('~')
-    
-    def get_fillers2(self, context_string):
-        context = tuple(context_string.split())
-        current_node = self.root
-        for word in context:
-            if word in current_node.children:
-                current_node = current_node.children[word]
-            else:
-                return
-        return current_node.fillers
     
     def get_node(self, string):
         sequence = tuple(string.split())
@@ -131,9 +186,25 @@ class ContextTrie:
         return current_node
     
     def record_contexts(self, sentence):
-        suffix_tries = self.suffix_tries(sentence).values()
-        for suffix_trie in suffix_tries:
-            self.rec_merge(self.root, suffix_trie.root)
+        filler_context_pairs = (
+            (sentence[i:j], (sentence[:i], sentence[j:]))
+            for i in range(len(sentence))
+            for j in range(i+1, len(sentence)+1)
+        )
+        for filler, context in filler_context_pairs:
+            left_context, right_context = context
+            context_node = self.root
+            for left_context_suffix in ()
+                self.ref_add_filler(context_node, left_context, )
+            # Make branch for context
+            for word in context:
+                if word not in context_node.children.keys():
+                    new_node = ContextNode(word)
+                    context_node.children[word] = new_node
+                context_node = context_node.children[word]
+            context_node.count += 1
+            context_node = context_node.fillers.root
+            pass
     
     def dyn_record_contexts(self, sentence):
         prev_children = defaultdict(ContextNode)
