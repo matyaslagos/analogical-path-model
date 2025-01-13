@@ -80,7 +80,7 @@ class SlotStatus(Enum):
 class FreqNode:
     def __init__(self, label):
         self.label = label
-        self.children = defaultdict(FreqNode)
+        self.children = {}
         self.count = 0
 
 class FreqTrie:
@@ -90,7 +90,7 @@ class FreqTrie:
 class FillerNode:
     def __init__(self, label):
         self.label = label
-        self.children = defaultdict(FillerNode)
+        self.children = {}
         self.contexts = FreqTrie()
         self.count = 0
 
@@ -128,18 +128,22 @@ class FillerTrie:
             self.rec_add_context(context_node, reversed(left_context), right_context)
     
     def rec_add_context(self, context_node, rev_left_context, right_context):
+        # Non-recursively add right context to current left context
         context_node.count += 1
+        self.add_right_context(context_node, right_context)
         try:
+            # Process next word of reversed left context
             word = next(rev_left_context)
         except:
+            # No more left context, end recursion
             return
-        # (1) Non-slot node: continue adding left context
+        # Recursively extend left context
         if word not in context_node.children.keys():
             new_node = FreqNode(word)
             context_node.children[word] = new_node
-        # Recursive call
         self.rec_add_context(context_node.children[word], rev_left_context, right_context)
-        # (2) Slot node: record slot node and right context
+    
+    def add_right_context(self, context_node, right_context):
         if '_' not in context_node.children.keys():
             new_node = FreqNode('_')
             context_node.children['_'] = new_node
@@ -153,6 +157,7 @@ class FillerTrie:
             context_node = context_node.children[word]
             context_node.count += 1
         
+        
 class ContextNode:
     def __init__(self, label):
         """Initialize a new node in the context trie.
@@ -163,7 +168,7 @@ class ContextNode:
             count (int): Number of times this context has been seen
         """
         self.label = label
-        self.children = defaultdict(ContextNode)  # Maps words to child nodes
+        self.children = {}  # Maps words to child nodes
         self.fillers = FreqTrie()
         self.count = 0      # Frequency counter for this context
         
@@ -187,24 +192,40 @@ class ContextTrie:
     
     def record_contexts(self, sentence):
         filler_context_pairs = (
-            (sentence[i:j], (sentence[:i], sentence[j:]))
+            (sentence[i:j], (sentence[:i], ('_',) + sentence[j:]))
             for i in range(len(sentence))
             for j in range(i+1, len(sentence)+1)
         )
         for filler, context in filler_context_pairs:
             left_context, right_context = context
             context_node = self.root
-            for left_context_suffix in ()
-                self.ref_add_filler(context_node, left_context, )
-            # Make branch for context
-            for word in context:
+            # TODO: correctly check if prefix fillers are correctly added
+            # TODO: make nicer, esp. when adding new child nodes
+            self.insert_right_context(context_node, filler, right_context)
+            for word in reversed(left_context):
                 if word not in context_node.children.keys():
                     new_node = ContextNode(word)
                     context_node.children[word] = new_node
                 context_node = context_node.children[word]
+                context_node.count += 1
+                self.insert_right_context(context_node, filler, right_context)
+    
+    def insert_right_context(self, context_node, filler, right_context):
+        # Record right context and filler
+        for word in right_context:
+            if word not in context_node.children.keys():
+                new_node = ContextNode(word)
+                context_node.children[word] = new_node
+            context_node = context_node.children[word]
             context_node.count += 1
-            context_node = context_node.fillers.root
-            pass
+        # Add filler to each node of right context (incl. slot node)
+        filler_node = context_node.fillers.root
+        for filler_word in filler:
+            if filler_word not in filler_node.children.keys():
+                new_node = FreqNode(filler_word)
+                filler_node.children[filler_word] = new_node
+            filler_node = filler_node.children[filler_word]
+        filler_node.count += 1
     
     def dyn_record_contexts(self, sentence):
         prev_children = defaultdict(ContextNode)
