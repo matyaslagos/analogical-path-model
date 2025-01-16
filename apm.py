@@ -21,6 +21,9 @@ def txt2list(filename):
         lines = file.readlines()
     return [tuple(line.strip().split()) for line in lines]
 
+def corpus_setup():
+    return txt2list('grimm_full_commas.txt')
+
 def slot_insert(cdy, sentence):
     slot_insert_aux(cdy, sentence)
     for i in range(1, len(sentence)):
@@ -63,13 +66,6 @@ def slot_insert_aux(cdy, sentence, slotted=False, filler=None, count_slots=True)
 
 # Class implementation
 
-def test():
-    sentence = ('a', 'certain', 'king', 'had', 'a', 'beautiful', 'garden')
-    cdy = ContextTrie()
-    cdy.record_contexts(sentence)
-    pp(cdy.get_fillers2('a _ garden'))
-    return cdy
-
 class SlotStatus(Enum):
     UNSLOTTED = auto()
     SLOTTING = auto()
@@ -77,15 +73,94 @@ class SlotStatus(Enum):
     INFIX = auto()
     SUFFIX = auto()
 
-class FreqNode:
+class FreqNodeQ:
     def __init__(self, label):
         self.label = label
         self.children = {}
         self.count = 0
+    
+    def get_or_make_branch(self, tuple_of_strings, count_each_word=False):
+        current_node = self
+        for word in tuple_of_strings:
+            if count_each_word:
+                current_node.count += 1
+            current_node = current_node.get_or_make_child(word)
+        current_node.count += 1
+        return current_node
+    
+    def get_or_make_child(self, child_label):
+        if child_label not in self.children:
+            child_type = type(self)
+            self.children[child_label] = child_type(child_label)
+        return self.children[child_label]
 
-class FreqTrie:
+class FreqTrieQ:
     def __init__(self):
-        self.root = FreqNode('~')
+        self.root = FreqNodeQ('~')
+
+class DistrNodeQ(FreqNodeQ):
+    def __init__(self, label):
+        super().__init__(label)
+        self.filler_finder = FreqTrieQ() # Left-to-right left contexts
+        self.context_finder = FreqTrieQ() # Right-to-left left contexts
+
+class DistrTrieQ:
+    def __init__(self):
+        self.root = DistrNodeQ('~')
+    
+    def insert_distr(self, sentence):
+        context_pairs = ((sentence[:i], sentence[i:]) for i in range(len(sentence)))
+        for left_context, right_context in context_pairs:
+            current_node = self.root
+            for word in right_context:
+                current_node = current_node.get_or_make_child(word)
+                current_node.count += 1
+                # Record right-to-left left context
+                context_finder_node = current_node.context_finder.root
+                context_finder_node.get_or_make_branch(tuple(reversed(left_context)), count_each_word=True)
+                # Record all suffixes of left-to-right context
+                filler_finder_node = current_node.filler_finder.root
+                left_context_suffixes = (left_context[j:] for j in range(len(left_context)))
+                for left_context_suffix in left_context_suffixes:
+                    filler_finder_node.get_or_make_branch(left_context_suffix)
+                
+    
+    def insert_fillers(self, sentence):
+        filler_context_pairs = (
+            (sentence[i:j], (sentence[:i], ('_',) + sentence[j:]))
+            for i in range(len(sentence))
+            for j in range(i+1, len(sentence)+1)
+        )
+        for filler, context in filler_context_pairs:
+            left_context, right_context = context
+            filler_node = self.root.get_or_make_branch(filler)
+            filler_node.count += 1
+            self.rec_add_context(filler_node.contexts.root, reversed(left_context), right_context)
+    
+    def rec_add_context(self, context_node, rev_left_context, right_context):
+        # Non-recursively add right context to current left context
+        context_node.get_or_make_branch(right_context, count=True)
+        # Process next word of reversed left context or end recursion
+        try:
+            word = next(rev_left_context)
+        except:
+            return
+        # Recursively extend left context
+        self.rec_add_context(context_node.get_or_make_child(word), rev_left_context, right_context)
+    
+    def insert_contexts(self, sentence):
+        filler_right_context_pairs = (
+            (sentence[i:j], sentence[j:])
+            for i in range(len(sentence))
+            for j in range(i+1, len(sentence)+1)
+        )
+        for filler, right_context in filler_right_context_pairs:
+            context_node = self.root
+            for word in right_context:
+                context_node = context_node.get_or_make_child(word)
+                filler_node = context_node.fillers.root.get_or_make_branch(filler)
+                filler_node.count += 1
+        
 
 class FillerNode:
     def __init__(self, label):
@@ -93,6 +168,11 @@ class FillerNode:
         self.children = {}
         self.contexts = FreqTrie()
         self.count = 0
+    
+    def get_or_make_child(self, child_word):
+        if child_word not in self.children:
+            self.children[child_word] = FillerNode(child_word)
+        return self.children[child_word]
 
 class FillerTrie:
     def __init__(self):
@@ -110,7 +190,7 @@ class FillerTrie:
     
     def record_fillers(self, sentence):
         filler_context_pairs = (
-            (sentence[i:j], (sentence[:i], sentence[j:]))
+            (sentence[i:j], (sentence[:i], ('_',) + sentence[j:]))
             for i in range(len(sentence))
             for j in range(i+1, len(sentence)+1)
         )
@@ -119,10 +199,7 @@ class FillerTrie:
             filler_node = self.root
             # Make branch for filler
             for word in filler:
-                if word not in filler_node.children.keys():
-                    new_node = FillerNode(word)
-                    filler_node.children[word] = new_node
-                filler_node = filler_node.children[word]
+                filler_node = filler_node.get_or_make_child(word)
             filler_node.count += 1
             context_node = filler_node.contexts.root
             self.rec_add_context(context_node, reversed(left_context), right_context)
@@ -131,30 +208,18 @@ class FillerTrie:
         # Non-recursively add right context to current left context
         context_node.count += 1
         self.add_right_context(context_node, right_context)
+        # Process next word of reversed left context or end recursion
         try:
-            # Process next word of reversed left context
             word = next(rev_left_context)
         except:
-            # No more left context, end recursion
             return
         # Recursively extend left context
-        if word not in context_node.children.keys():
-            new_node = FreqNode(word)
-            context_node.children[word] = new_node
-        self.rec_add_context(context_node.children[word], rev_left_context, right_context)
+        context_node = context_node.get_or_make_child(word)
+        self.rec_add_context(context_node, rev_left_context, right_context)
     
     def add_right_context(self, context_node, right_context):
-        if '_' not in context_node.children.keys():
-            new_node = FreqNode('_')
-            context_node.children['_'] = new_node
-        context_node = context_node.children['_']
-        context_node.count += 1
-        # Record right context
         for word in right_context:
-            if word not in context_node.children.keys():
-                new_node = FreqNode(word)
-                context_node.children[word] = new_node
-            context_node = context_node.children[word]
+            context_node = context_node.get_or_make_child(word)
             context_node.count += 1
         
         
@@ -171,7 +236,13 @@ class ContextNode:
         self.children = {}  # Maps words to child nodes
         self.fillers = FreqTrie()
         self.count = 0      # Frequency counter for this context
-        
+    
+    def get_or_make_child(self, child_word):
+        if child_word not in self.children:
+            self.children[child_word] = ContextNode(child_word)
+        return self.children[child_word]
+            
+    
     def record_filler(self, filler, latifix):
         self.fillers._record_filler_aux(self.fillers.root, filler, latifix)
 
@@ -199,32 +270,22 @@ class ContextTrie:
         for filler, context in filler_context_pairs:
             left_context, right_context = context
             context_node = self.root
-            # TODO: correctly check if prefix fillers are correctly added
-            # TODO: make nicer, esp. when adding new child nodes
+            # TODO: see if non-reversed way is better
             self.insert_right_context(context_node, filler, right_context)
             for word in reversed(left_context):
-                if word not in context_node.children.keys():
-                    new_node = ContextNode(word)
-                    context_node.children[word] = new_node
-                context_node = context_node.children[word]
+                context_node = context_node.get_or_make_child(word)
                 context_node.count += 1
                 self.insert_right_context(context_node, filler, right_context)
     
     def insert_right_context(self, context_node, filler, right_context):
         # Record right context and filler
         for word in right_context:
-            if word not in context_node.children.keys():
-                new_node = ContextNode(word)
-                context_node.children[word] = new_node
-            context_node = context_node.children[word]
+            context_node = context_node.get_or_make_child(word)
             context_node.count += 1
         # Add filler to each node of right context (incl. slot node)
         filler_node = context_node.fillers.root
-        for filler_word in filler:
-            if filler_word not in filler_node.children.keys():
-                new_node = FreqNode(filler_word)
-                filler_node.children[filler_word] = new_node
-            filler_node = filler_node.children[filler_word]
+        for word in filler:
+            filler_node = filler_node.get_or_make_child(word)
         filler_node.count += 1
     
     def dyn_record_contexts(self, sentence):
