@@ -37,15 +37,12 @@ class FreqNode:
         self.count = 0
         self.context_count = 0
     
-    def get_or_make_branch(self, tuple_of_strings, count_each_word=False):
+    def get_or_make_branch(self, tuple_of_strings):
         current_node = self
         for word in tuple_of_strings:
             current_node.context_count += 1
             current_node = current_node.get_or_make_child(word)
-            if count_each_word:
-                current_node.count += 1
-        if not count_each_word:
-            current_node.count += 1
+        current_node.count += 1
         return current_node
     
     def get_or_make_child(self, child_label):
@@ -91,11 +88,10 @@ class DistrTrie:
         for left_context, right_context in context_pairs:
             left_context_suffixes = [left_context[j:] for j in range(len(left_context))]
             current_node = self.root
-            for left_context_suffix in left_context_suffixes:
-                current_node.finder.root.get_or_make_branch(left_context_suffix)
             for word in right_context:
                 current_node = current_node.get_or_make_child(word)
                 current_node.count += 1
+                current_node.context_count += 1
                 # Record all suffixes of left-to-right context
                 finder_node = current_node.finder.root
                 for left_context_suffix in left_context_suffixes:
@@ -129,17 +125,18 @@ class DistrTrie:
         """
         left_context, right_context = map(lambda x: x.strip().split(), context.split('_'))
         context_node = self.root
+        current_node = self.root
         # Go to node of right context
         for i, word in enumerate(right_context):
             try:
-                context_node = context_node.children[word]
+                current_node = current_node.children[word]
+                context_node = current_node.finder.root
             except KeyError:
                 failed_part = '_ ' + ' '.join(right_context[:i+1]) + ' ...'
                 raise KeyError(
                     f'Context \"{context}\" not found (failed at \"{failed_part}\")'
                     )
         # Within the filler finder of right context, go to node of left context
-        context_node = context_node.finder.root
         for i, word in enumerate(left_context):
             try:
                 context_node = context_node.children[word]
