@@ -3,32 +3,37 @@ from collections import defaultdict, namedtuple
 from copy import deepcopy
 from pprint import pp
 
-# Function implementation
+# Setup functions
 
 # Import a txt file (containing one sentence per line) as a list whose each
 # element is a list of words corresponding to a line in the txt file:
 def txt2list(filename):
-    """Import a txt list of sentences as a list of lists of words.
+    """Import a txt list of sentences as a list of tuples of words.
 
     Argument:
-        - filename (string): e.g. 'grimm_corpus.txt'
+        - filename (string): e.g. 'grimm_corpus_no_commas.txt'
 
     Returns:
-        - list (of list of strings): e.g.
-          [['my', 'name', 'is', 'jolán'], ['i', 'am', 'cool'], ..., ['bye']]
+        - list (of tuples of strings): e.g.
+          [('my', 'name', 'is', 'jolán'), ('i', 'am', 'cool'), ..., ('bye',)]
     """
     with open(filename, mode='r', encoding='utf-8-sig') as file:
         lines = file.readlines()
     return [tuple(line.strip().split()) for line in lines]
 
 def corpus_setup():
-    return txt2list('grimm_full_commas.txt')
+    return txt2list('grimm_full_no_commas.txt')
 
 def distrtrie_setup(corpus):
     ddy = DistrTrie()
     for sentence in corpus:
         ddy.insert_distr(sentence)
     return ddy
+
+
+# Trie class for recording distribution information about corpus
+
+
 
 class FreqNode:
     def __init__(self, label):
@@ -63,7 +68,7 @@ class DistrNode(FreqNode):
 class DistrTrie:
     def __init__(self):
         self.root = DistrNode('~')
-    
+     
     # Record distribution information about a sentence
     def insert_distr(self, sentence):
         """Record all contexts and fillers of `sentence` into trie.
@@ -164,7 +169,10 @@ class DistrTrie:
                 child_node1 = distr_node1.children[child]
                 child_node2 = distr_node2.children[child]
                 if child_node1.count > 0 and child_node2.count > 0:
-                    yield ' '.join(new_path)
+                    freq1 = child_node1.count
+                    freq2 = child_node2.count
+                    form = ' '.join(new_path)
+                    yield (form, freq1, freq2)
                 yield from self.shared_branches(child_node1, child_node2, new_path)
         
     # Yield each shared context of two fillers
@@ -201,7 +209,7 @@ class DistrTrie:
                 failed_part = ' '.join(filler_list[:i+1]) + ' ...'
                 raise KeyError(
                     f'Filler \"{filler}\" not found (failed at \"{failed_part}\")'
-                    )
+                )
         return filler_node
     
     # Recursively yield each shared context of two filler nodes
@@ -220,19 +228,74 @@ class DistrTrie:
         # Find all shared left contexts within the current shared right context
         left_contexts1 = filler_node1.finder.root
         left_contexts2 = filler_node2.finder.root
-        shared_left_contexts = self.shared_branches(left_contexts1, left_contexts2)
-        for shared_left_context in shared_left_contexts:
-            yield (shared_left_context + ' _ ' + ' '.join(shared_right_context)).strip()
+        shared_left_context_infos = self.shared_branches(left_contexts1, left_contexts2)
+        for shared_left_context_info in shared_left_context_infos:
+            shared_left_context, context_freq1, context_freq2 = shared_left_context_info
+            shared_context = (
+                shared_left_context
+                + ' _ '
+                + ' '.join(shared_right_context)
+            ).strip()
+            yield (shared_context, context_freq1, context_freq2)
         # Recursive traversal of each shared child of the fillers, to cover all
         # shared right contexts
         for child in filler_node1.children:
             if child in filler_node2.children:
                 new_shared_right_context = shared_right_context + [child]
+                child_node1 = filler_node1.children[child]
+                child_node2 = filler_node2.children[child]
                 # Yield newly found shared right context by itself
-                yield '_ ' + ' '.join(new_shared_right_context)
+                shared_context = '_ ' + ' '.join(new_shared_right_context)
+                context_freq1 = child_node1.count
+                context_freq2 = child_node2.count
+                yield (shared_context, context_freq1, context_freq2)
                 # Recursive call on new shared right context and new child
                 # nodes, to find the shared left contexts within this new right
                 # context
-                child_node1 = filler_node1.children[child]
-                child_node2 = filler_node2.children[child]
-                yield from self.shared_contexts_aux(child_node1, child_node2, new_shared_right_context)
+                yield from self.shared_contexts_aux(
+                    child_node1,
+                    child_node2,
+                    new_shared_right_context
+                )
+    
+    def get_fillers(self, context):
+        context_node = self.get_context_node(context)
+        return self.get_fillers_aux(context_node, path=[])
+    
+    def get_fillers_aux(self, context_node, path):
+        for child in context_node.children:
+            new_path = path + [child]
+            child_node = context_node.children[child]
+            if child_node.count > 0:
+                filler = ' '.join(new_path)
+                freq = child_node.count
+                yield (filler, freq)
+            yield from self.get_fillers_aux(child_node, new_path)
+    
+    def analogical_paths(self, context, filler):
+        anl_path_infos = []
+        freq_dict = {}
+        freq_dict[context] = self.get_context_node(context).context_count
+        # Loop over all fillers of context to find analogical fillers
+        anl_fillers = self.get_fillers(context)
+        for anl_filler, first_step_freq in anl_fillers:
+            freq_dict[anl_filler] = self.get_filler_node(anl_filler).count
+            freq_dict[(context, anl_filler)] = first_step_freq
+            # Calculate weight of moving from context to analogical filler
+            first_step_weight = freq_dict[(context, anl_filler)] / freq_dict[context]
+            # Loop over all shared contexts of analogical filler and filler
+            # to find analogical contexts
+            anl_contexts = self.shared_contexts(anl_filler, filler)
+            for anl_context, second_step_freq, third_step_freq in anl_contexts:
+                freq_dict[anl_context] = self.get_context_node(anl_context).context_count
+                freq_dict[(anl_context, anl_filler)] = second_step_freq
+                freq_dict[(anl_context, filler)] = third_step_freq
+                # Calculate weight of moving from analogical filler to
+                # analogical context and then from analogical context to filler
+                second_step_weight = freq_dict[(anl_context, anl_filler)] / freq_dict[anl_filler]
+                third_step_weight = freq_dict[(anl_context, filler)] / freq_dict[anl_context]
+                # Calculate and record full weight of analogical path
+                anl_path_weight = first_step_weight * second_step_weight * third_step_weight
+                anl_path_info = ((anl_context, anl_filler), anl_path_weight)
+                anl_path_infos.append(anl_path_info)
+        return sorted(anl_path_infos, key=lambda x: x[1], reverse=True)
