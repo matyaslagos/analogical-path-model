@@ -258,11 +258,13 @@ class DistrTrie:
                     new_shared_right_context
                 )
     
-    def get_fillers(self, context):
+    def get_fillers(self, context, max_length=float('inf')):
         context_node = self.get_context_node(context)
-        return self.get_fillers_aux(context_node, path=[])
+        return self.get_fillers_aux(context_node, [], max_length)
     
-    def get_fillers_aux(self, context_node, path):
+    def get_fillers_aux(self, context_node, path, max_length):
+        if len(path) >= max_length:
+            return
         for child in context_node.children:
             new_path = path + [child]
             child_node = context_node.children[child]
@@ -270,32 +272,38 @@ class DistrTrie:
                 filler = ' '.join(new_path)
                 freq = child_node.count
                 yield (filler, freq)
-            yield from self.get_fillers_aux(child_node, new_path)
+            yield from self.get_fillers_aux(child_node, new_path, max_length)
     
     def analogical_paths(self, context, filler):
         anl_path_infos = []
-        freq_dict = {}
-        freq_dict[context] = self.get_context_node(context).context_count
-        # Loop over all fillers of context to find analogical fillers
-        anl_fillers = self.get_fillers(context)
-        for anl_filler, first_step_freq in anl_fillers:
-            freq_dict[anl_filler] = self.get_filler_node(anl_filler).count
-            freq_dict[(context, anl_filler)] = first_step_freq
-            # Calculate weight of moving from context to analogical filler
-            first_step_weight = freq_dict[(context, anl_filler)] / freq_dict[context]
+        org_ctxt_freq = self.get_context_node(context).context_count
+        anl_fillers = self.get_fillers(context, len(filler.split()))
+        for anl_filler, org_ctxt_anl_fllr_freq in anl_fillers:
+            anl_fllr_freq = self.get_filler_node(anl_filler).count
+            # Calculate probability of moving from original context to
+            # analogical filler
+            org_ctxt_anl_fllr_prob = org_ctxt_anl_fllr_freq / org_ctxt_freq
             # Loop over all shared contexts of analogical filler and filler
             # to find analogical contexts
             anl_contexts = self.shared_contexts(anl_filler, filler)
-            for anl_context, second_step_freq, third_step_freq in anl_contexts:
-                freq_dict[anl_context] = self.get_context_node(anl_context).context_count
-                freq_dict[(anl_context, anl_filler)] = second_step_freq
-                freq_dict[(anl_context, filler)] = third_step_freq
+            for anl_context, anl_ctxt_anl_fllr_freq, anl_ctxt_org_fllr_freq in anl_contexts:
+                anl_ctxt_freq = self.get_context_node(anl_context).context_count
                 # Calculate weight of moving from analogical filler to
                 # analogical context and then from analogical context to filler
-                second_step_weight = freq_dict[(anl_context, anl_filler)] / freq_dict[anl_filler]
-                third_step_weight = freq_dict[(anl_context, filler)] / freq_dict[anl_context]
+                anl_ctxt_anl_fllr_prob = anl_ctxt_anl_fllr_freq / anl_fllr_freq
+                anl_ctxt_org_fllr_prob = anl_ctxt_org_fllr_freq / anl_ctxt_freq
                 # Calculate and record full weight of analogical path
-                anl_path_weight = first_step_weight * second_step_weight * third_step_weight
-                anl_path_info = ((anl_context, anl_filler), anl_path_weight)
+                anl_path_prob = (
+                      org_ctxt_anl_fllr_prob
+                    * anl_ctxt_anl_fllr_prob
+                    * anl_ctxt_org_fllr_prob
+                )
+                anl_path_info = ((anl_context, anl_filler), anl_path_prob)
                 anl_path_infos.append(anl_path_info)
-        return sorted(anl_path_infos, key=lambda x: x[1], reverse=True)
+        filler_dict = {}
+        for path, score in anl_path_infos:
+            if path[1] in filler_dict:
+                filler_dict[path[1]] += score
+            else:
+                filler_dict[path[1]] = score
+        return sorted(filler_dict.items(), key=lambda x: x[1], reverse=True)
