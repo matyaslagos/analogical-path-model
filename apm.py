@@ -260,9 +260,9 @@ class DistrTrie:
     
     def get_fillers(self, context, max_length=float('inf')):
         context_node = self.get_context_node(context)
-        return self.get_fillers_aux(context_node, [], max_length)
+        return self.get_fillers_aux(context_node, max_length, path=[])
     
-    def get_fillers_aux(self, context_node, path, max_length):
+    def get_fillers_aux(self, context_node, max_length, path):
         if len(path) >= max_length:
             return
         for child in context_node.children:
@@ -273,6 +273,13 @@ class DistrTrie:
                 freq = child_node.count
                 yield (filler, freq)
             yield from self.get_fillers_aux(child_node, new_path, max_length)
+    
+    def get_contexts(self, filler):
+        filler_node = self.get_filler_node(filler)
+        return self.get_contexts_aux(filler_node)
+    
+    def get_contexts_aux(self, filler_node, right_context=[]):
+        
     
     def analogical_paths(self, context, filler):
         anl_path_infos = []
@@ -307,3 +314,58 @@ class DistrTrie:
             else:
                 filler_dict[path[1]] = score
         return sorted(filler_dict.items(), key=lambda x: x[1], reverse=True)
+    
+    def indirect_rl_analogical_paths(self, right_context, filler):
+        anl_path_infos = []
+        org_ctxt_freq = self.get_context_node(right_context).context_count
+        anl_fillers = self.get_indirect_fillers(right_context, len(filler.split()))
+        for anl_filler, org_ctxt_anl_fllr_freq in anl_fillers:
+            anl_fllr_freq = self.get_filler_node(anl_filler).count
+            # Calculate probability of moving from original context to
+            # analogical filler
+            org_ctxt_anl_fllr_prob = org_ctxt_anl_fllr_freq / org_ctxt_freq
+            # Loop over all shared contexts of analogical filler and filler
+            # to find analogical contexts
+            anl_contexts = self.shared_contexts(anl_filler, filler)
+            for anl_context, anl_ctxt_anl_fllr_freq, anl_ctxt_org_fllr_freq in anl_contexts:
+                anl_ctxt_freq = self.get_context_node(anl_context).context_count
+                # Calculate weight of moving from analogical filler to
+                # analogical context and then from analogical context to filler
+                anl_ctxt_anl_fllr_prob = anl_ctxt_anl_fllr_freq / anl_fllr_freq
+                anl_ctxt_org_fllr_prob = anl_ctxt_org_fllr_freq / anl_ctxt_freq
+                # Calculate and record full weight of analogical path
+                anl_path_prob = (
+                      org_ctxt_anl_fllr_prob
+                    * anl_ctxt_anl_fllr_prob
+                    * anl_ctxt_org_fllr_prob
+                )
+                anl_path_info = ((anl_context, anl_filler), anl_path_prob)
+                anl_path_infos.append(anl_path_info)
+        filler_dict = {}
+        for path, score in anl_path_infos:
+            if path[1] in filler_dict:
+                filler_dict[path[1]] += score
+            else:
+                filler_dict[path[1]] = score
+        return sorted(filler_dict.items(), key=lambda x: x[1], reverse=True)
+    
+    def get_indirect_fillers(self, right_context, max_length=float('inf')):
+        context_node = self.get_context_node(right_context)
+        return self.get_indirect_fillers_aux(context_node, max_length, path=[])
+
+    def get_indirect_fillers_aux(self, context_node, max_length, path):
+        if len(path) >= max_length:
+            return
+        for child in context_node.children:
+            new_path = path + [child]
+            child_node = context_node.children[child]
+            if child_node.context_count > 0:
+                filler = ' '.join(new_path)
+                freq = child_node.context_count
+                yield (filler, freq)
+            yield from self.get_indirect_fillers_aux(child_node, max_length, new_path)
+    
+    def indirect_lr_analogical_paths(self, left_context, filler):
+        anl_path_infos = []
+        org_ctxt_freq = self.get_context_node(left_context).context_count
+        anl_contexts = self.get_contexts(filler)
