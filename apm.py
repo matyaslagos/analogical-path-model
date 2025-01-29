@@ -206,7 +206,7 @@ class DistrTrie:
             try:
                 filler_node = filler_node.children[word]
             except KeyError:
-                failed_part = ' '.join(filler_list[:i+1]) + ' ...'
+                failed_part = ' '.join(filler_words_list[:i+1]) + ' ...'
                 raise KeyError(
                     f'Filler \"{filler}\" not found (failed at \"{failed_part}\")'
                 )
@@ -260,26 +260,52 @@ class DistrTrie:
     
     def get_fillers(self, context, max_length=float('inf')):
         context_node = self.get_context_node(context)
-        return self.get_fillers_aux(context_node, max_length, path=[])
+        return self.get_branches(context_node, max_length)
     
-    def get_fillers_aux(self, context_node, max_length, path):
+    def get_branches(self, current_node, max_length=float('inf'), path=[]):
         if len(path) >= max_length:
             return
-        for child in context_node.children:
+        for child in current_node.children:
             new_path = path + [child]
-            child_node = context_node.children[child]
+            child_node = current_node.children[child]
             if child_node.count > 0:
-                filler = ' '.join(new_path)
+                branch = ' '.join(new_path)
                 freq = child_node.count
-                yield (filler, freq)
-            yield from self.get_fillers_aux(child_node, new_path, max_length)
+                yield (branch, freq)
+            yield from self.get_branches(child_node, max_length, new_path)
     
     def get_contexts(self, filler):
         filler_node = self.get_filler_node(filler)
         return self.get_contexts_aux(filler_node)
     
     def get_contexts_aux(self, filler_node, right_context=[]):
-        
+        # Find all shared left contexts within the current shared right context
+        left_context_node = filler_node.finder.root
+        left_context_infos = self.get_branches(left_context_node)
+        for left_context_info in left_context_infos:
+            left_context, freq = left_context_info
+            context = (
+                left_context
+                + ' _ '
+                + ' '.join(right_context)
+            ).strip()
+            yield (context, freq)
+        # Recursive traversal of each shared child of the fillers, to cover all
+        # shared right contexts
+        for child in filler_node.children:
+            new_right_context = right_context + [child]
+            child_node = filler_node.children[child]
+            # Yield newly found shared right context by itself
+            context = '_ ' + ' '.join(new_right_context)
+            freq = child_node.count
+            yield (context, freq)
+            # Recursive call on new shared right context and new child
+            # nodes, to find the shared left contexts within this new right
+            # context
+            yield from self.get_contexts_aux(
+                child_node,
+                new_right_context
+            )
     
     def analogical_paths(self, context, filler):
         anl_path_infos = []
@@ -369,3 +395,30 @@ class DistrTrie:
         anl_path_infos = []
         org_ctxt_freq = self.get_context_node(left_context).context_count
         anl_contexts = self.get_contexts(filler)
+        for anl_context, anl_ctxt_org_fllr_freq in anl_contexts:
+            anl_ctxt_freq = self.get_context_node(anl_context).context_count
+            anl_ctxt_org_fllr_prob = anl_ctxt_org_fllr_freq / anl_ctxt_freq
+            anl_fillers = self.get_fillers(anl_context, len(filler.split()))
+            for anl_filler, anl_ctxt_anl_fllr_freq in anl_fillers:
+                anl_fllr_freq = self.get_filler_node(anl_filler).count
+                anl_ctxt_anl_fllr_prob = anl_ctxt_anl_fllr_freq / anl_fllr_freq
+                org_ctxt_anl_fllr = left_context + ' ' + anl_filler
+                try:
+                    org_ctxt_anl_fllr_freq = self.get_context_node(org_ctxt_anl_fllr).count
+                except:
+                    continue
+                org_ctxt_anl_fllr_prob = org_ctxt_anl_fllr_freq / org_ctxt_freq
+                anl_path_prob = (
+                      org_ctxt_anl_fllr_prob
+                    * anl_ctxt_anl_fllr_prob
+                    * anl_ctxt_org_fllr_prob
+                )
+                anl_path_info = ((anl_context, anl_filler), anl_path_prob)
+                anl_path_infos.append(anl_path_info)
+        filler_dict = {}
+        for path, score in anl_path_infos:
+            if path[1] in filler_dict:
+                filler_dict[path[1]] += score
+            else:
+                filler_dict[path[1]] = score
+        return sorted(filler_dict.items(), key=lambda x: x[1], reverse=True)
