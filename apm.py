@@ -1,7 +1,5 @@
-from enum import Enum, auto
-from collections import defaultdict, namedtuple
-from copy import deepcopy
-from pprint import pp
+from itertools import product
+from collections import defaultdict
 
 # Setup functions
 
@@ -422,3 +420,35 @@ class DistrTrie:
             else:
                 filler_dict[path[1]] = score
         return sorted(filler_dict.items(), key=lambda x: x[1], reverse=True)
+    
+    def rec_anls(self, gram, lookup_dy={}):
+        # End of recursion
+        if len(gram) == 1:
+            return [(gram, 1)]
+        # Check dynamic lookup table
+        if gram in lookup_dy:
+            return lookup_dy[gram]
+        # Gram is context
+        if '_' in gram:
+            
+        # Find analogies using each context-filler split
+        context_filler_pairs = (
+            ((sentence[:i], sentence[j:]), sentence[i:j])
+            for i in range(len(sentence) + 1)
+            for j in range(i + 1, len(sentence) + int(i > 0))
+        )
+        anl_grams = defaultdict(float)
+        for context, filler in context_filler pairs:
+            anl_contexts = self.rec_anls(context, lookup_dy)
+            anl_fillers = self.rec_anls(filler, lookup_dy)
+            for anl_context, anl_filler in product(anl_contexts, anl_fillers):
+                subst_fillers = self.analogical_paths(anl_context, anl_filler)
+                for subst_filler in subst_fillers:
+                    slot_index = anl_context.index('_')
+                    anl_gram = (
+                          anl_context[:slot_index]
+                        + subst_filler
+                        + anl_context[slot_index+1:]
+                    )
+                    anl_grams[anl_gram] += 0
+                    pass
