@@ -442,14 +442,14 @@ class DistrTrie:
         indir_rl_prob = sum(score for path, score in indir_rl_paths)
         for lr_path, score in indir_lr_paths:
             try:
-                self.get_context_node(lr_path)
+                self.get_context_node(indir_left_context + lr_path)
                 path_infos[indir_left_context + lr_path] += score * indir_lr_prob
             except:
                 continue
         for rl_path, score in indir_rl_paths:
             try:
-                self.get_context_node(rl_path)
-                path_infos[indir_left_context + rl_path] += score * indir_rl_prob
+                self.get_context_node(rl_path + indir_right_context)
+                path_infos[rl_path + indir_right_context] += score * indir_rl_prob
             except:
                 continue
         return sorted(path_infos.items(), key=lambda x: x[1], reverse=True)[:5]
