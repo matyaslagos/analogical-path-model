@@ -31,8 +31,6 @@ def distrtrie_setup(corpus):
 
 # Trie class for recording distribution information about corpus
 
-
-
 class FreqNode:
     def __init__(self, label):
         self.label = label
@@ -100,7 +98,7 @@ class DistrTrie:
                 for left_context_suffix in left_context_suffixes:
                     finder_node.get_or_make_branch(left_context_suffix)
     
-    # Yield each shared filler of two contexts
+    # Yield each shared filler of two contexts TODO: not str, tup
     def shared_fillers(self, context1, context2):
         """Yield each shared filler of `context1` and `context2`.
         
@@ -115,9 +113,9 @@ class DistrTrie:
         context_node2 = self.get_context_node(context2)
         return self.shared_branches(context_node1, context_node2)
     
-    # Return the filler finder trie of a context
+    # Return the filler finder trie of a context TODO: not str, tup
     def get_context_node(self, context):
-        """Return the filler finder trie of `context`.
+        """TODO: not str, tup. Return the filler finder trie of `context`.
         
         Argument:
             - context (string): e.g. 'a _ king'
@@ -126,7 +124,9 @@ class DistrTrie:
             - DistrNode: the node that is the root of the trie of the fillers
               that occurred in `context`
         """
-        left_context, right_context = map(lambda x: x.strip().split(), context.split('_'))
+        #left_context, right_context = map(lambda x: x.strip().split(), context.split('_'))
+        slot_index = context.index('_')
+        left_context, right_context = context[:slot_index], context[slot_index + 1:]
         context_node = self.root
         current_node = self.root
         # Go to node of right context
@@ -153,11 +153,11 @@ class DistrTrie:
     # Recursively yield each shared filler of two context nodes
     def shared_branches(self, distr_node1, distr_node2, path=[]):
         """Yield each shared branch of `distr_node1` and `distr_node2`.
-        
+    
         Arguments:
             - distr_node1 (DistrNode): root of a subtrie
             - distr_node2 (DistrNode): root of another subtrie
-        
+    
         Yields:
             - string: branch that is shared by the two input subtries
         """
@@ -169,12 +169,12 @@ class DistrTrie:
                 if child_node1.count > 0 and child_node2.count > 0:
                     freq1 = child_node1.count
                     freq2 = child_node2.count
-                    form = ' '.join(new_path)
+                    form = tuple(new_path)
                     yield (form, freq1, freq2)
                 yield from self.shared_branches(child_node1, child_node2, new_path)
         
-    # Yield each shared context of two fillers
-    def shared_contexts(self, filler1, filler2):
+    # Yield each shared context of two fillers TODO: not str, tup
+    def shared_contexts(self, filler1, filler2, max_length=float('inf')):
         """Yield each shared context of `filler1` and `filler2`.
         
         Arguments:
@@ -186,11 +186,11 @@ class DistrTrie:
         """
         filler_node1 = self.get_filler_node(filler1)
         filler_node2 = self.get_filler_node(filler2)
-        return self.shared_contexts_aux(filler_node1, filler_node2)
+        return self.shared_contexts_aux(filler_node1, filler_node2, max_length)
     
-    # Return the node of a filler
+    # Return the node of a filler TODO: not str, tup
     def get_filler_node(self, filler):
-        """Return the context finder node of `filler`.
+        """TODO: not str, tup. Return the context finder node of `filler`.
         
         Argument:
             - filler (string): e.g. 'the nice king'
@@ -198,20 +198,20 @@ class DistrTrie:
         Returns:
             - DistrNode: the main trie node of `filler`
         """
-        filler_words_list = filler.split()
+        #filler = filler.split()
         filler_node = self.root
-        for i, word in enumerate(filler_words_list):
+        for i, word in enumerate(filler):
             try:
                 filler_node = filler_node.children[word]
             except KeyError:
-                failed_part = ' '.join(filler_words_list[:i+1]) + ' ...'
+                failed_part = ' '.join(filler[:i+1]) + ' ...'
                 raise KeyError(
                     f'Filler \"{filler}\" not found (failed at \"{failed_part}\")'
                 )
         return filler_node
     
     # Recursively yield each shared context of two filler nodes
-    def shared_contexts_aux(self, filler_node1, filler_node2, shared_right_context=[]):
+    def shared_contexts_aux(self, filler_node1, filler_node2, max_length=float('inf'), shared_right_context=[]):
         """Yield each shared context of `filler_node1` and `filler_node2`.
         
         Arguments:
@@ -229,21 +229,25 @@ class DistrTrie:
         shared_left_context_infos = self.shared_branches(left_contexts1, left_contexts2)
         for shared_left_context_info in shared_left_context_infos:
             shared_left_context, context_freq1, context_freq2 = shared_left_context_info
+            if len(shared_left_context) + len(shared_right_context) > max_length:
+                return
             shared_context = (
                 shared_left_context
-                + ' _ '
-                + ' '.join(shared_right_context)
-            ).strip()
+                + ('_',)
+                + tuple(shared_right_context)
+            )
             yield (shared_context, context_freq1, context_freq2)
         # Recursive traversal of each shared child of the fillers, to cover all
         # shared right contexts
+        if len(shared_right_context) >= max_length:
+            return
         for child in filler_node1.children:
             if child in filler_node2.children:
                 new_shared_right_context = shared_right_context + [child]
                 child_node1 = filler_node1.children[child]
                 child_node2 = filler_node2.children[child]
                 # Yield newly found shared right context by itself
-                shared_context = '_ ' + ' '.join(new_shared_right_context)
+                shared_context = ('_',) + tuple(new_shared_right_context)
                 context_freq1 = child_node1.count
                 context_freq2 = child_node2.count
                 yield (shared_context, context_freq1, context_freq2)
@@ -253,9 +257,11 @@ class DistrTrie:
                 yield from self.shared_contexts_aux(
                     child_node1,
                     child_node2,
+                    max_length,
                     new_shared_right_context
                 )
     
+    # From here on: contexts and fillers are tup
     def get_fillers(self, context, max_length=float('inf')):
         context_node = self.get_context_node(context)
         return self.get_branches(context_node, max_length)
@@ -267,34 +273,38 @@ class DistrTrie:
             new_path = path + [child]
             child_node = current_node.children[child]
             if child_node.count > 0:
-                branch = ' '.join(new_path)
+                branch = tuple(new_path)
                 freq = child_node.count
                 yield (branch, freq)
             yield from self.get_branches(child_node, max_length, new_path)
     
-    def get_contexts(self, filler):
+    def get_contexts(self, filler, max_length=float('inf')):
         filler_node = self.get_filler_node(filler)
-        return self.get_contexts_aux(filler_node)
+        return self.get_contexts_aux(filler_node, max_length)
     
-    def get_contexts_aux(self, filler_node, right_context=[]):
+    def get_contexts_aux(self, filler_node, max_length=float('inf'), right_context=[]):
         # Find all shared left contexts within the current shared right context
         left_context_node = filler_node.finder.root
         left_context_infos = self.get_branches(left_context_node)
         for left_context_info in left_context_infos:
             left_context, freq = left_context_info
+            if len(left_context) + len(right_context) > max_length:
+                return
             context = (
                 left_context
-                + ' _ '
-                + ' '.join(right_context)
-            ).strip()
+                + ('_',)
+                + tuple(right_context)
+            )
             yield (context, freq)
         # Recursive traversal of each shared child of the fillers, to cover all
         # shared right contexts
+        if len(right_context) >= max_length:
+            return
         for child in filler_node.children:
             new_right_context = right_context + [child]
             child_node = filler_node.children[child]
             # Yield newly found shared right context by itself
-            context = '_ ' + ' '.join(new_right_context)
+            context = ('_',) + tuple(new_right_context)
             freq = child_node.count
             yield (context, freq)
             # Recursive call on new shared right context and new child
@@ -302,13 +312,14 @@ class DistrTrie:
             # context
             yield from self.get_contexts_aux(
                 child_node,
+                max_length,
                 new_right_context
             )
     
     def analogical_paths(self, context, filler):
         anl_path_infos = []
         org_ctxt_freq = self.get_context_node(context).context_count
-        anl_fillers = self.get_fillers(context, len(filler.split()))
+        anl_fillers = self.get_fillers(context, len(filler))
         for anl_filler, org_ctxt_anl_fllr_freq in anl_fillers:
             anl_fllr_freq = self.get_filler_node(anl_filler).count
             # Calculate probability of moving from original context to
@@ -342,7 +353,7 @@ class DistrTrie:
     def indirect_rl_analogical_paths(self, right_context, filler):
         anl_path_infos = []
         org_ctxt_freq = self.get_context_node(right_context).context_count
-        anl_fillers = self.get_indirect_fillers(right_context, len(filler.split()))
+        anl_fillers = self.get_indirect_fillers(right_context, len(filler))
         for anl_filler, org_ctxt_anl_fllr_freq in anl_fillers:
             anl_fllr_freq = self.get_filler_node(anl_filler).count
             # Calculate probability of moving from original context to
@@ -350,7 +361,7 @@ class DistrTrie:
             org_ctxt_anl_fllr_prob = org_ctxt_anl_fllr_freq / org_ctxt_freq
             # Loop over all shared contexts of analogical filler and filler
             # to find analogical contexts
-            anl_contexts = self.shared_contexts(anl_filler, filler)
+            anl_contexts = self.shared_contexts(anl_filler, filler, len(right_context)-1)
             for anl_context, anl_ctxt_anl_fllr_freq, anl_ctxt_org_fllr_freq in anl_contexts:
                 anl_ctxt_freq = self.get_context_node(anl_context).context_count
                 # Calculate weight of moving from analogical filler to
@@ -384,7 +395,7 @@ class DistrTrie:
             new_path = path + [child]
             child_node = context_node.children[child]
             if child_node.context_count > 0:
-                filler = ' '.join(new_path)
+                filler = tuple(new_path)
                 freq = child_node.context_count
                 yield (filler, freq)
             yield from self.get_indirect_fillers_aux(child_node, max_length, new_path)
@@ -392,15 +403,15 @@ class DistrTrie:
     def indirect_lr_analogical_paths(self, left_context, filler):
         anl_path_infos = []
         org_ctxt_freq = self.get_context_node(left_context).context_count
-        anl_contexts = self.get_contexts(filler)
+        anl_contexts = self.get_contexts(filler, len(left_context)-1)
         for anl_context, anl_ctxt_org_fllr_freq in anl_contexts:
             anl_ctxt_freq = self.get_context_node(anl_context).context_count
             anl_ctxt_org_fllr_prob = anl_ctxt_org_fllr_freq / anl_ctxt_freq
-            anl_fillers = self.get_fillers(anl_context, len(filler.split()))
+            anl_fillers = self.get_fillers(anl_context, len(filler))
             for anl_filler, anl_ctxt_anl_fllr_freq in anl_fillers:
                 anl_fllr_freq = self.get_filler_node(anl_filler).count
                 anl_ctxt_anl_fllr_prob = anl_ctxt_anl_fllr_freq / anl_fllr_freq
-                org_ctxt_anl_fllr = left_context + ' ' + anl_filler
+                org_ctxt_anl_fllr = left_context + anl_filler
                 try:
                     org_ctxt_anl_fllr_freq = self.get_context_node(org_ctxt_anl_fllr).count
                 except:
@@ -421,6 +432,28 @@ class DistrTrie:
                 filler_dict[path[1]] = score
         return sorted(filler_dict.items(), key=lambda x: x[1], reverse=True)
     
+    def indir_anl_paths(self, left_context, right_context):
+        path_infos = defaultdict(float)
+        indir_left_context = left_context + ('_',)
+        indir_right_context = ('_',) + right_context
+        indir_lr_paths = self.analogical_paths(indir_left_context, right_context)
+        indir_rl_paths = self.analogical_paths(indir_right_context, left_context)
+        indir_lr_prob = sum(score for path, score in indir_lr_paths)
+        indir_rl_prob = sum(score for path, score in indir_rl_paths)
+        for lr_path, score in indir_lr_paths:
+            try:
+                self.get_context_node(lr_path)
+                path_infos[indir_left_context + lr_path] += score * indir_lr_prob
+            except:
+                continue
+        for rl_path, score in indir_rl_paths:
+            try:
+                self.get_context_node(rl_path)
+                path_infos[indir_left_context + rl_path] += score * indir_rl_prob
+            except:
+                continue
+        return sorted(path_infos.items(), key=lambda x: x[1], reverse=True)[:5]
+    
     def rec_anls(self, gram, lookup_dy={}):
         # End of recursion
         if len(gram) == 1:
@@ -430,7 +463,27 @@ class DistrTrie:
             return lookup_dy[gram]
         # Gram is context
         if '_' in gram:
-            
+            slot_index = gram.index('_')
+            left_context, right_context = gram[:slot_index], gram[slot_index + 1:]
+            if slot_index in {0, len(gram) - 1}:
+                context = left_context + right_context
+                anl_contexts = self.rec_anls(context, lookup_dy)
+                is_left = int(slot_index == 0)
+                return [
+                    (is_left * ('_',) + anl_context + (1 - is_left) * ('_',), score)
+                    for anl_context, score in anl_contexts
+                ]
+            else:
+                anl_left_contexts = self.rec_anls(left_context, lookup_dy)
+                anl_right_contexts = self.rec_anls(right_context, lookup_dy)
+                anl_context_pairs = product(anl_left_contexts, anl_right_contexts)
+                anl_contexts = defaultdict(float)
+                for anl_left_context, anl_right_context in anl_context_pairs:
+                    subst_contexts = indir_anl_paths(anl_left_context, anl_right_context)
+                    for subst_context, score in subst_contexts:
+                        anl_contexts[subst_context] += score
+                return sorted(anl_contexts.items(), key=lambda x: x[1], reverse=True)[:5]
+        
         # Find analogies using each context-filler split
         context_filler_pairs = (
             ((sentence[:i], sentence[j:]), sentence[i:j])
@@ -438,7 +491,7 @@ class DistrTrie:
             for j in range(i + 1, len(sentence) + int(i > 0))
         )
         anl_grams = defaultdict(float)
-        for context, filler in context_filler pairs:
+        for context, filler in context_filler_pairs:
             anl_contexts = self.rec_anls(context, lookup_dy)
             anl_fillers = self.rec_anls(filler, lookup_dy)
             for anl_context, anl_filler in product(anl_contexts, anl_fillers):
