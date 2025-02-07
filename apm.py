@@ -316,7 +316,7 @@ class DistrTrie:
                 new_right_context
             )
     
-    def analogical_paths(self, context, filler):
+    def anl_paths(self, context, filler):
         anl_path_infos = []
         org_ctxt_freq = self.get_context_node(context).context_count
         anl_fillers = self.get_fillers(context, len(filler))
@@ -348,41 +348,7 @@ class DistrTrie:
                 filler_dict[path[1]] += score
             else:
                 filler_dict[path[1]] = score
-        return sorted(filler_dict.items(), key=lambda x: x[1], reverse=True)
-    
-    def indirect_rl_analogical_paths(self, right_context, filler):
-        anl_path_infos = []
-        org_ctxt_freq = self.get_context_node(right_context).context_count
-        anl_fillers = self.get_indirect_fillers(right_context, len(filler))
-        for anl_filler, org_ctxt_anl_fllr_freq in anl_fillers:
-            anl_fllr_freq = self.get_filler_node(anl_filler).count
-            # Calculate probability of moving from original context to
-            # analogical filler
-            org_ctxt_anl_fllr_prob = org_ctxt_anl_fllr_freq / org_ctxt_freq
-            # Loop over all shared contexts of analogical filler and filler
-            # to find analogical contexts
-            anl_contexts = self.shared_contexts(anl_filler, filler, len(right_context)-1)
-            for anl_context, anl_ctxt_anl_fllr_freq, anl_ctxt_org_fllr_freq in anl_contexts:
-                anl_ctxt_freq = self.get_context_node(anl_context).context_count
-                # Calculate weight of moving from analogical filler to
-                # analogical context and then from analogical context to filler
-                anl_ctxt_anl_fllr_prob = anl_ctxt_anl_fllr_freq / anl_fllr_freq
-                anl_ctxt_org_fllr_prob = anl_ctxt_org_fllr_freq / anl_ctxt_freq
-                # Calculate and record full weight of analogical path
-                anl_path_prob = (
-                      org_ctxt_anl_fllr_prob
-                    * anl_ctxt_anl_fllr_prob
-                    * anl_ctxt_org_fllr_prob
-                )
-                anl_path_info = ((anl_context, anl_filler), anl_path_prob)
-                anl_path_infos.append(anl_path_info)
-        filler_dict = {}
-        for path, score in anl_path_infos:
-            if path[1] in filler_dict:
-                filler_dict[path[1]] += score
-            else:
-                filler_dict[path[1]] = score
-        return sorted(filler_dict.items(), key=lambda x: x[1], reverse=True)
+        return sorted(filler_dict.items(), key=lambda x: x[1], reverse=True)[:10]
     
     def get_indirect_fillers(self, right_context, max_length=float('inf')):
         context_node = self.get_context_node(right_context)
@@ -400,61 +366,9 @@ class DistrTrie:
                 yield (filler, freq)
             yield from self.get_indirect_fillers_aux(child_node, max_length, new_path)
     
-    def indirect_lr_analogical_paths(self, left_context, filler):
-        anl_path_infos = []
-        org_ctxt_freq = self.get_context_node(left_context).context_count
-        anl_contexts = self.get_contexts(filler, len(left_context)-1)
-        for anl_context, anl_ctxt_org_fllr_freq in anl_contexts:
-            anl_ctxt_freq = self.get_context_node(anl_context).context_count
-            anl_ctxt_org_fllr_prob = anl_ctxt_org_fllr_freq / anl_ctxt_freq
-            anl_fillers = self.get_fillers(anl_context, len(filler))
-            for anl_filler, anl_ctxt_anl_fllr_freq in anl_fillers:
-                anl_fllr_freq = self.get_filler_node(anl_filler).count
-                anl_ctxt_anl_fllr_prob = anl_ctxt_anl_fllr_freq / anl_fllr_freq
-                org_ctxt_anl_fllr = left_context + anl_filler
-                try:
-                    org_ctxt_anl_fllr_freq = self.get_context_node(org_ctxt_anl_fllr).count
-                except:
-                    continue
-                org_ctxt_anl_fllr_prob = org_ctxt_anl_fllr_freq / org_ctxt_freq
-                anl_path_prob = (
-                      org_ctxt_anl_fllr_prob
-                    * anl_ctxt_anl_fllr_prob
-                    * anl_ctxt_org_fllr_prob
-                )
-                anl_path_info = ((anl_context, anl_filler), anl_path_prob)
-                anl_path_infos.append(anl_path_info)
-        filler_dict = {}
-        for path, score in anl_path_infos:
-            if path[1] in filler_dict:
-                filler_dict[path[1]] += score
-            else:
-                filler_dict[path[1]] = score
-        return sorted(filler_dict.items(), key=lambda x: x[1], reverse=True)
-    
-    def indir_anl_paths(self, left_context, right_context):
-        path_infos = defaultdict(float)
-        indir_left_context = left_context + ('_',)
-        indir_right_context = ('_',) + right_context
-        indir_lr_paths = self.analogical_paths(indir_left_context, right_context)
-        indir_rl_paths = self.analogical_paths(indir_right_context, left_context)
-        indir_lr_prob = sum(score for path, score in indir_lr_paths)
-        indir_rl_prob = sum(score for path, score in indir_rl_paths)
-        for lr_path, score in indir_lr_paths:
-            try:
-                self.get_context_node(indir_left_context + lr_path)
-                path_infos[indir_left_context + lr_path] += score * indir_lr_prob
-            except:
-                continue
-        for rl_path, score in indir_rl_paths:
-            try:
-                self.get_context_node(rl_path + indir_right_context)
-                path_infos[rl_path + indir_right_context] += score * indir_rl_prob
-            except:
-                continue
-        return sorted(path_infos.items(), key=lambda x: x[1], reverse=True)[:5]
-    
-    def rec_anls(self, gram, lookup_dy={}):
+    def rec_anls(self, gram, lookup_dy=None):
+        if lookup_dy is None:
+            lookup_dy = {}
         # End of recursion
         if len(gram) == 1:
             return [(gram, 1)]
@@ -467,22 +381,27 @@ class DistrTrie:
             left_context, right_context = gram[:slot_index], gram[slot_index + 1:]
             if slot_index in {0, len(gram) - 1}:
                 context = left_context + right_context
-                anl_contexts = self.rec_anls(context, lookup_dy)
+                anl_contexts = self.rec_anls(context, lookup_dy)[context]
                 is_left = int(slot_index == 0)
-                return [
-                    (is_left * ('_',) + anl_context + (1 - is_left) * ('_',), score)
+                context_format = lambda x: is_left * ('_',) + x + (1 - is_left) * ('_',)
+                anl_grams = [
+                    (context_format(anl_context), score)
                     for anl_context, score in anl_contexts
                 ]
+                lookup_dy[gram] = anl_grams
+                return lookup_dy
             else:
-                anl_left_contexts = self.rec_anls(left_context, lookup_dy)
-                anl_right_contexts = self.rec_anls(right_context, lookup_dy)
+                anl_left_contexts = self.rec_anls(left_context, lookup_dy)[left_context]
+                anl_right_contexts = self.rec_anls(right_context, lookup_dy)[right_context]
                 anl_context_pairs = product(anl_left_contexts, anl_right_contexts)
                 anl_contexts = defaultdict(float)
                 for anl_left_context, anl_right_context in anl_context_pairs:
-                    subst_contexts = indir_anl_paths(anl_left_context, anl_right_context)
+                    subst_contexts = self.indir_anl_paths(anl_left_context, anl_right_context)
                     for subst_context, score in subst_contexts:
                         anl_contexts[subst_context] += score
-                return sorted(anl_contexts.items(), key=lambda x: x[1], reverse=True)[:5]
+                anl_grams = sorted(anl_contexts.items(), key=lambda x: x[1], reverse=True)[:5]
+                lookup_dy[gram] = anl_grams
+                return lookup_dy
         
         # Find analogies using each context-filler split
         context_filler_pairs = (
@@ -492,16 +411,63 @@ class DistrTrie:
         )
         anl_grams = defaultdict(float)
         for context, filler in context_filler_pairs:
-            anl_contexts = self.rec_anls(context, lookup_dy)
-            anl_fillers = self.rec_anls(filler, lookup_dy)
-            for anl_context, anl_filler in product(anl_contexts, anl_fillers):
-                subst_fillers = self.analogical_paths(anl_context, anl_filler)
-                for subst_filler in subst_fillers:
+            anl_context_infos = self.rec_anls(context, lookup_dy)[context]
+            anl_fillers_infos = self.rec_anls(filler, lookup_dy)[filler]
+            for anl_context_info, anl_filler_info in product(anl_context_infos, anl_fillers_infos):
+                anl_context, anl_context_score = anl_context_info
+                anl_filler, anl_filler_score = anl_filler_info
+                subst_filler_infos = self.anl_paths(anl_context, anl_filler)
+                for subst_filler_info in subst_filler_infos:
+                    subst_filler, subst_filler_score = subst_filler_info
                     slot_index = anl_context.index('_')
                     anl_gram = (
                           anl_context[:slot_index]
                         + subst_filler
                         + anl_context[slot_index+1:]
                     )
-                    anl_grams[anl_gram] += 0
-                    pass
+                    anl_grams[anl_gram] += subst_filler_score * anl_context_score * anl_filler_score
+        anl_grams = sorted(anl_grams.items(), key=lambda x: x[1], reverse=True)[:5]
+        lookup_dy[gram] = anl_grams
+        return lookup_dy
+
+    def indir_anl_paths(self, left_context, right_context):
+        path_infos = defaultdict(float)
+        indir_left_context = left_context + ('_',)
+        indir_right_context = ('_',) + right_context
+        indir_lr_paths = self.anl_paths(indir_left_context, right_context)
+        indir_rl_paths = self.anl_paths(indir_right_context, left_context)
+        indir_lr_prob = sum(score for path, score in indir_lr_paths)
+        indir_rl_prob = sum(score for path, score in indir_rl_paths)
+        for lr_path, score in indir_lr_paths:
+            try:
+                ctxt_freq = self.get_context_node(indir_left_context + lr_path).context_count
+                left_freq = self.get_context_node(indir_left_context).context_count
+                right_freq = self.get_filler_node(lr_path).count
+                rel_freq = ctxt_freq / right_freq
+                path_infos[indir_left_context + lr_path] += score * indir_lr_prob * rel_freq
+            except:
+                continue
+        for rl_path, score in indir_rl_paths:
+            try:
+                ctxt_freq = self.get_context_node(rl_path + indir_right_context).context_count
+                right_freq = self.get_context_node(indir_right_context).context_count
+                left_freq = self.get_filler_node(rl_path).count
+                rel_freq = ctxt_freq / left_freq
+                path_infos[rl_path + indir_right_context] += score * indir_rl_prob * rel_freq
+            except:
+                continue
+        for lr_path_info, rl_path_info in product(indir_lr_paths[:10], indir_rl_paths[:10]):
+            lr_path, lr_score = lr_path_info
+            rl_path, rl_score = rl_path_info
+            anl_context = rl_path + ('_',) + lr_path
+            try:
+                ctxt_freq = self.get_context_node(anl_context).context_count
+                score = min(lr_score, rl_score)
+                indir_prob = min(indir_lr_prob, indir_rl_prob)
+                left_freq = self.get_filler_node(rl_path).count
+                right_freq = self.get_filler_node(lr_path).count
+                rel_freq = ctxt_freq / (left_freq * right_freq)
+                path_infos[anl_context] += score * indir_prob * rel_freq
+            except:
+                continue
+        return sorted(path_infos.items(), key=lambda x: x[1], reverse=True)[:5]
