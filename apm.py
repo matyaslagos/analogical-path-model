@@ -369,12 +369,13 @@ class DistrTrie:
     def rec_anls(self, gram, lookup_dy=None):
         if lookup_dy is None:
             lookup_dy = {}
-        # End of recursion
-        if len(gram) == 1:
-            return [(gram, 1)]
         # Check dynamic lookup table
         if gram in lookup_dy:
-            return lookup_dy[gram]
+            return lookup_dy
+        # End of recursion
+        if len(gram) == 1:
+            lookup_dy[gram] = [(gram, 1)]
+            return lookup_dy
         # Gram is context
         if '_' in gram:
             slot_index = gram.index('_')
@@ -395,19 +396,21 @@ class DistrTrie:
                 anl_right_contexts = self.rec_anls(right_context, lookup_dy)[right_context]
                 anl_context_pairs = product(anl_left_contexts, anl_right_contexts)
                 anl_contexts = defaultdict(float)
-                for anl_left_context, anl_right_context in anl_context_pairs:
+                for anl_left_context_info, anl_right_context_info in anl_context_pairs:
+                    anl_left_context, anl_left_context_score = anl_left_context_info
+                    anl_right_context, anl_right_context_score = anl_right_context_info
                     subst_contexts = self.indir_anl_paths(anl_left_context, anl_right_context)
                     for subst_context, score in subst_contexts:
-                        anl_contexts[subst_context] += score
+                        anl_contexts[subst_context] += score * anl_left_context_score * anl_right_context_score
                 anl_grams = sorted(anl_contexts.items(), key=lambda x: x[1], reverse=True)[:5]
                 lookup_dy[gram] = anl_grams
                 return lookup_dy
         
         # Find analogies using each context-filler split
         context_filler_pairs = (
-            ((sentence[:i], sentence[j:]), sentence[i:j])
-            for i in range(len(sentence) + 1)
-            for j in range(i + 1, len(sentence) + int(i > 0))
+            (gram[:i] + ('_',) + gram[j:], gram[i:j])
+            for i in range(len(gram) + 1)
+            for j in range(i + 1, len(gram) + int(i > 0))
         )
         anl_grams = defaultdict(float)
         for context, filler in context_filler_pairs:
@@ -441,7 +444,6 @@ class DistrTrie:
         for lr_path, score in indir_lr_paths:
             try:
                 ctxt_freq = self.get_context_node(indir_left_context + lr_path).context_count
-                left_freq = self.get_context_node(indir_left_context).context_count
                 right_freq = self.get_filler_node(lr_path).count
                 rel_freq = ctxt_freq / right_freq
                 path_infos[indir_left_context + lr_path] += score * indir_lr_prob * rel_freq
@@ -450,7 +452,6 @@ class DistrTrie:
         for rl_path, score in indir_rl_paths:
             try:
                 ctxt_freq = self.get_context_node(rl_path + indir_right_context).context_count
-                right_freq = self.get_context_node(indir_right_context).context_count
                 left_freq = self.get_filler_node(rl_path).count
                 rel_freq = ctxt_freq / left_freq
                 path_infos[rl_path + indir_right_context] += score * indir_rl_prob * rel_freq
