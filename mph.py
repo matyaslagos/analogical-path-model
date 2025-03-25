@@ -20,6 +20,16 @@ def txt2wordlist(filename):
         if word.isalpha()
     ]
 
+def csv2wordfreqdict(filename):
+    """Import filename as a dict of words (tuples of characters) with int values.
+    """
+    with open(filename, newline='', encoding='utf-8-sig') as file:
+        reader = csv.DictReader(file)
+        clean_word = lambda s: s.strip(punctuation).lower()
+        return {
+            ('<',) + tuple(clean_word(row['key'])) + ('>',): int(row['value'])
+            for row in reader}
+
 def train_test_split(corpus):
     corpus_copy = corpus[:]
     random.shuffle(corpus_copy)
@@ -29,10 +39,21 @@ def train_test_split(corpus):
 def corpus_setup():
     return txt2wordlist('sztaki_corpus.txt')
 
-def distrtrie_setup(corpus):
+def distrtrie_setup(sequence_list):
     ddy = FreqTrie()
-    for sentence in corpus:
-        ddy.insert_distr(sentence)
+    for sequence in sequence_list:
+        ddy.insert_distr(sequence)
+    return ddy
+
+def distrtrie_setup_freq(sequence_freq_dict):
+    ddy = FreqTrie()
+    most_freq_items = sorted(
+        sequence_freq_dict.items(),
+        key=lambda x: x[1],
+        reverse=True
+        )[:50000]
+    for sequence, freq in most_freq_items:
+        ddy.insert_distr(sequence, freq)
     return ddy
 
 def lc(word):
@@ -51,9 +72,8 @@ class FreqNode:
     
     def get_or_make_branch(self, iterator_of_strings, freq=1):
         current_node = self
-        for word in iterator_of_strings:
-            current_node.context_count += freq
-            current_node = current_node.get_or_make_child(word)
+        for token in iterator_of_strings:
+            current_node = current_node.get_or_make_child(token)
         current_node.count += freq
         return current_node
     
@@ -68,7 +88,7 @@ class FreqTrie:
         self.bw_root = FreqNode()
     
     # Record distribution information about a sentence
-    def insert_distr(self, sentence):
+    def insert_distr(self, sentence, freq=1):
         """Record all contexts and fillers of `sentence` into trie.
         
         Arguments:
@@ -87,10 +107,27 @@ class FreqTrie:
             - main branches act as right contexts, and
             - finder branches act as left contexts and fillers.
         """
-        pref_suff_pairs = ((sentence[:i], sentence[i:]) for i in range(len(sentence) + 1))
+        pref_suff_pairs = (
+            (sentence[:i], sentence[i:])
+            for i in range(len(sentence) + 1)
+        )
         for prefix, suffix in pref_suff_pairs:
-            self.fw_root.get_or_make_branch(suffix)
-            self.bw_root.get_or_make_branch(reversed(prefix))
+            self.fw_root.get_or_make_branch(suffix, freq)
+            self.bw_root.get_or_make_branch(reversed(prefix), freq)
+    
+    def get_context_node(self, context):
+        if context[-1] == '_':
+            current_node = self.fw_root
+            context_iterator = context[:-1]
+        else:
+            current_node = self.bw_root
+            context_iterator = reversed(context[1:])
+        for word in context_iterator:
+            try:
+                current_node = current_node.children[word]
+            except KeyError:
+                return
+        return current_node
     
     # Yield each shared filler of two contexts TODO: not str, tup
     def shared_fillers(self, context1, context2):
@@ -107,21 +144,7 @@ class FreqTrie:
         context_node2 = self.get_context_node(context2)
         direction = context1.index('_')
         return self.get_shared_branches(context_node1, context_node2, direction)
-    
-    def get_context_node(self, context):
-        if context[-1] == '_':
-            current_node = self.fw_root
-            context_iterator = context[:-1]
-        else:
-            current_node = self.bw_root
-            context_iterator = reversed(context[1:])
-        for word in context_iterator:
-            try:
-                current_node = current_node.children[word]
-            except KeyError:
-                return
-        return current_node
-    
+  
     # Recursively yield each shared filler of two context nodes
     def get_shared_branches(self, distr_node1, distr_node2, direction, path=[]):
         """Yield each shared branch of `distr_node1` and `distr_node2`.
@@ -162,6 +185,20 @@ class FreqTrie:
                 freq = child_node.count
                 yield (branch, freq)
             yield from self.get_branches(child_node, direction, max_length, new_path)
+
+def get_freq(self, context):
+    if context[-1] == '_':
+        current_node = self.bw_root
+        context_iterator = reversed(context[:-1])
+    else:
+        current_node = self.fw_root
+        context_iterator = context[1:]
+    for word in context_iterator:
+        try:
+            current_node = current_node.children[word]
+        except KeyError:
+            return 0
+    return current_node.count
 
 def get_fillers_func(self, context, max_length=float('inf')):
     context_node = self.get_context_node(context)
@@ -226,8 +263,8 @@ def anl_contexts_func(self, context, filler):
     for anl_context, anl_context_filler_freq in get_fillers_func(self, filler):
         if anl_context == context:
             continue
-        anl_context_pred, anl_context_data = context_pred_func(self, anl_context, context)
-        anl_context_freq = self.get_context_node(anl_context).context_count
+        anl_context_pred, anl_context_data = context_pred_func(self, anl_context, context, filler)
+        anl_context_freq = get_freq(self, anl_context)
         filler_cond_prob = anl_context_filler_freq / anl_context_freq
         anl_prob = anl_context_pred * filler_cond_prob
         anl_path_infos[''.join(anl_context)] += anl_prob
@@ -242,13 +279,11 @@ def anl_words_func(self, context, filler):
     for anl_context, anl_context_filler_freq in get_fillers_func(self, filler):
         if anl_context == context:
             continue
-        anl_context_pred, anl_filler_data = context_pred_func(self, anl_context, context)
-        anl_context_freq = self.get_context_node(anl_context).context_count
+        anl_context_pred, anl_filler_data = context_pred_func(self, anl_context, context, filler)
+        anl_context_freq = get_freq(self, anl_context)
         filler_cond_prob = anl_context_filler_freq / anl_context_freq
         anl_prob = anl_context_pred * filler_cond_prob
         for anl_filler, anl_filler_value in anl_filler_data:
-            if anl_filler == filler:
-                continue
             gram = context_filler_merge(self, anl_context, anl_filler)
             anl_path_infos[gram] += anl_filler_value * filler_cond_prob * len(anl_filler_data)
     return sorted(
@@ -263,11 +298,16 @@ def context_filler_merge(self, context, filler):
     else:
         return ''.join(filler[:-1]) + ' + ' + ''.join(context[1:])
 
-def context_pred_func(self, anl_context, context):
+def typefreq_func(self, context):
+    return len(list(self.get_fillers(context)))
+
+def context_pred_func(self, anl_context, context, filler=None):
     pred_dict = defaultdict(float)
-    anl_context_freq = self.get_context_node(anl_context).context_count
+    anl_context_freq = get_freq(self, anl_context)
     for shared_filler, acf_freq, ocf_freq in get_shared_fillers_func(self, anl_context, context):
-        filler_freq = self.get_context_node(shared_filler).context_count
+        if filler == shared_filler:
+            continue
+        filler_freq = get_freq(self, shared_filler)
         anl_gram_prob = acf_freq / anl_context_freq
         org_gram_prob = ocf_freq / filler_freq
         pred_dict[shared_filler] += anl_gram_prob * org_gram_prob
@@ -276,19 +316,11 @@ def context_pred_func(self, anl_context, context):
 def predictors_func(self, context):
     direction = context.index('_')
     predictor_dict = defaultdict(lambda: defaultdict(float))
-    context_node = self.get_context_node(context)
-    if context_node is None:
-        return [(tuple(), 0)]
-    else:
-        context_freq = context_node.context_count
+    context_freq = get_freq(self, context)
     fillers = self.get_fillers(context)
     for filler, context_filler_freq in fillers:
         filler_as_context = ('_',) + filler if direction else filler + ('_',)
-        filler_node = self.get_context_node(filler_as_context)
-        if filler_node is None:
-            return [(tuple(), 0)]
-        else:
-            filler_freq = filler_node.context_count
+        filler_freq = get_freq(self, filler)
         # Calculate probability of moving from original context to
         # analogical filler
         context_filler_prob = context_filler_freq / filler_freq
@@ -297,7 +329,7 @@ def predictors_func(self, context):
         anl_contexts = self.get_fillers(filler_as_context)
         for anl_context, anl_context_filler_freq in anl_contexts:
             anl_context = anl_context + ('_',) if direction else ('_',) + anl_context
-            anl_context_freq = self.get_context_node(anl_context).context_count
+            anl_context_freq = get_freq(self, anl_context)
             # Calculate weight of moving from analogical filler to
             # analogical context and then from analogical context to filler
             if 0 in {filler_freq, anl_context_freq}:
