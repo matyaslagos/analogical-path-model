@@ -319,14 +319,14 @@ def predictors_func(self, context):
     context_freq = get_freq(self, context)
     fillers = self.get_fillers(context)
     for filler, context_filler_freq in fillers:
-        filler_as_context = ('_',) + filler if direction else filler + ('_',)
+        filler = ('_',) + filler if direction else filler + ('_',)
         filler_freq = get_freq(self, filler)
         # Calculate probability of moving from original context to
         # analogical filler
         context_filler_prob = context_filler_freq / filler_freq
         # Loop over all shared contexts of analogical filler and filler
         # to find analogical contexts
-        anl_contexts = self.get_fillers(filler_as_context)
+        anl_contexts = self.get_fillers(filler)
         for anl_context, anl_context_filler_freq in anl_contexts:
             anl_context = anl_context + ('_',) if direction else ('_',) + anl_context
             anl_context_freq = get_freq(self, anl_context)
