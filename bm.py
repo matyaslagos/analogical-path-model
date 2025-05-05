@@ -7,37 +7,64 @@ import csv
 
 # Setup functions
 
-def txt2wordlist(filename):
-    """Import filename as a list of words (tuples of characters).
+# Setup functions
+
+# Import a txt file (containing one sentence per line) as a list whose each
+# element is a list of words corresponding to a line in the txt file:
+def txt2list(filename):
+    """Import a txt list of sentences as a list of tuples of words.
+
+    Argument:
+        - filename (string): e.g. 'grimm_corpus_no_commas.txt'
+
+    Returns:
+        - list (of tuples of strings): e.g.
+          [('my', 'name', 'is', 'jolán'), ('i', 'am', 'cool'), ..., ('bye',)]
     """
     with open(filename, mode='r', encoding='utf-8-sig') as file:
         lines = file.readlines()
-    clean_word = lambda s: s.strip(punctuation).lower()
+    return [tuple(line.strip().split()) for line in lines] 
+
+def txt2wordlist(filename):
+    with open(filename, mode='r', encoding='utf-8-sig') as file:
+        lines = file.readlines()
+    clean_word = lambda s: s.strip(punctuation + ' ').lower()
     return [
-        ('<',) + tuple(word) + ('>',)
+        ('#',) + tuple(word) + ('/#',)
         for line in lines
         for word in map(clean_word, line.split())
         if word.isalpha()
     ]
 
-def csv2wordfreqdict(filename):
-    """Import filename as a dict of words (tuples of characters) with int values.
-    """
+def csv2list(filename):
     with open(filename, newline='', encoding='utf-8-sig') as file:
-        reader = csv.DictReader(file)
-        clean_word = lambda s: s.strip(punctuation).lower()
-        return {
-            ('<',) + tuple(clean_word(row['key'])) + ('>',): int(row['value'])
-            for row in reader}
+        reader = csv.reader(file, delimiter=';')
+        csv_as_list = [('<s>',) + tuple(row[0]) + ('</s>',) for row in reader]
+    return csv_as_list
+
+def ngrams(corpus, n):
+    ngram_corpus = []
+    for sentence in corpus:
+        endmarked_sentence = ('<',) * (n-1) + sentence + ('>',)
+        ngrams_of_sentence = zip(*(endmarked_sentence[i:] for i in range(n)))
+        for ngram in ngrams_of_sentence:
+            ngram_corpus.append(ngram)
+    return ngram_corpus
+
+def corpus_setup():
+    return ngrams(txt2list('grimm_full_no_commas.txt'), 2)
+
+def distrtrie_setup(corpus):
+    ddy = DistrTrie()
+    for sentence in corpus:
+        ddy.insert_distr(sentence)
+    return ddy
 
 def train_test_split(corpus):
     corpus_copy = corpus[:]
     random.shuffle(corpus_copy)
     split_point = int(0.9 * len(corpus_copy))
     return corpus_copy[:split_point], corpus_copy[split_point:]
-
-def corpus_setup():
-    return txt2wordlist('sztaki_corpus.txt')
 
 def distrtrie_setup(sequence_list):
     ddy = FreqTrie()
@@ -278,10 +305,12 @@ def anl_contexts_func(self, context, filler):
 
 def anl_substs(self, left, right):
     anl_bridge_dict = {}
+    #left_self_subst = 0
+    #right_self_subst = 0
     left_freq = get_freq(self, left)
     right_freq = get_freq(self, right)
-    left_substs_dict = defaultdict(lambda: {'distr': [], 'prob': 0, 'norm': 0})
-    right_substs_dict = defaultdict(lambda: {'distr': [], 'prob': 0, 'norm': 0})
+    left_substs_dict = defaultdict(lambda: {'distr': [], 'prob': 0})
+    right_substs_dict = defaultdict(lambda: {'distr': [], 'prob': 0})
     subst_grams_dict = {}
     # Calculate P(left || left)
     anl_rights = list(get_fillers_func(self, left))
@@ -318,12 +347,10 @@ def anl_substs(self, left, right):
                 left_substs_dict[anl_left]['prob'] += left_anl_right_freq * anl_left_anl_right_freq / (anl_right_freq * anl_left_freq)
                 left_int_prob = left_anl_right_freq * anl_left_anl_right_freq / (anl_right_freq * anl_left_freq)
                 left_substs_dict[anl_left]['distr'].append(left_int_prob)
-                left_substs_dict[anl_left]['norm'] += anl_left_freq * anl_right_freq
             if anl_right != right:
                 right_substs_dict[anl_right]['prob'] += anl_right_prob
                 right_int_prob = anl_left_right_freq * anl_left_anl_right_freq / (anl_left_freq * anl_right_freq)
                 right_substs_dict[anl_right]['distr'].append(right_int_prob)
-                right_substs_dict[anl_right]['norm'] += anl_left_freq * anl_right_freq
             gramify = lambda x: lambda y: context_filler_tuple(self, x, y)
             if (left, anl_right) not in anl_bridge_dict:
                 top_gram = gramify(left)(anl_right)
@@ -337,49 +364,11 @@ def anl_substs(self, left, right):
         left_entropy = norm_entropy_func(self, left_substs_dict[anl_left]['distr'])
         right_entropy = norm_entropy_func(self, right_substs_dict[anl_right]['distr'])
         anl_entropy = left_entropy * right_entropy
-        """
-        left_diversity = simpson_div_func(self, left_substs_dict[anl_left]['distr'])
-        right_diversity = simpson_div_func(self, right_substs_dict[anl_right]['distr'])
-        anl_diversity = left_diversity * right_diversity
-        """
         anl_prob = left_substs_dict[anl_left]['prob'] * right_substs_dict[anl_right]['prob']
-        anl_support = anl_entropy
+        anl_support = anl_prob * anl_entropy
         anl_gram = context_filler_merge(self, anl_left, anl_right)
         subst_grams_dict[anl_gram] = anl_support
     return sorted(subst_grams_dict.items(), key=lambda x: x[1], reverse=True)
-
-def anl_substs_indiv(self, left, right):
-    subst_grams_dict = {}
-    left_freq = get_freq(self, left)
-    right_freq = get_freq(self, right)
-    anl_rights = list(get_fillers_func(self, left))
-    for anl_right, left_anl_right_freq in anl_rights:
-        anl_right_freq = get_freq(self, anl_right)
-        anl_lefts = list(get_shared_fillers_func(self, anl_right, right))
-        for anl_left, anl_left_anl_right_freq, anl_left_right_freq in anl_lefts:
-            anl_left_freq = get_freq(self, anl_left)
-            anl_gram = context_filler_merge(self, anl_left, anl_right)
-            anl_prob = left_anl_right_freq * anl_left_right_freq / (anl_left_freq * anl_right_freq)
-            subst_grams_dict[anl_gram] = segm_entropy(self, left) * segm_entropy(self, right)
-    return sorted(subst_grams_dict.items(), key=lambda x: x[1], reverse=True)
-
-def subst_prod(ddy, source, goal):
-    shared_fillers = get_shared_fillers_func(ddy, source, goal)
-    source_freq = get_freq(ddy, source)
-    prob_dict = {}
-    for filler, source_filler_freq, goal_filler_freq in shared_fillers:
-        filler_freq = get_freq(ddy, filler)
-        subst_prob = (source_filler_freq * goal_filler_freq) / (source_freq * filler_freq)
-        prob_dict[filler] = subst_prob
-    return sum(prob_dict.values()), prob_dict
-
-def segm_entropy(self, context):
-    freqs = []
-    next_chars = self.get_context_node(context).children
-    for char in next_chars:
-        freqs.append(next_chars[char].context_count)
-    return norm_entropy_func(self, freqs)
-    
 
 def norm_entropy_func(self, prob_list):
     h = 0
@@ -388,30 +377,6 @@ def norm_entropy_func(self, prob_list):
         norm_prob = prob / norm
         h += norm_prob * math.log(1 / norm_prob, 2)
     return h
-
-def simpson_div_func(self, prob_list):
-    norm = sum(prob_list)
-    return (1 - sum((prob / norm) ** 2 for prob in prob_list))
-
-def expinf_vs_prob(self, context):
-    fillers = get_fillers_func(self, context)
-    n = 0
-    freqs = {}
-    for filler, freq in fillers:
-        n += freq
-        freqs[filler] = freq
-    probs = {filler: freq / n for filler, freq in freqs.items()}
-    entropy = 0
-    expinfs = {}
-    for filler, prob in probs.items():
-        expinf = prob * math.log(1 / prob, 2)
-        expinfs[filler] = expinf
-        entropy += expinf
-    infprobs = {filler: info for filler, info in expinfs.items()}
-    prob_list = sorted(probs.items(), key=lambda x: x[1], reverse=True)
-    infprob_list = sorted(infprobs.items(), key=lambda x: x[1], reverse=True)
-    return prob_list, infprob_list
-    
 
 def subst_contexts_func(self, context, filler):
     anl_context_dict = defaultdict(float)
@@ -530,10 +495,10 @@ def predictors_func(self, context):
 def iter_anls(self, word):
     anl_list = []
     for i in range(1, len(word)):
-        pref, suff = lc(word[:i]), rc(word[i:])
+        pref, suff = (word[:i] + ('_',)), (('_',) + word[i:])
         split_word = context_filler_merge(self, pref, suff)
         try:
-            analogies = anl_substs_indiv(self, pref, suff)
+            analogies = anl_substs(self, pref, suff)
             anl_prob = sum(x[1] for x in analogies)
             anl_list.append((split_word, anl_prob, analogies[:10]))
         except:
