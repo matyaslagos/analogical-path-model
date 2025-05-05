@@ -110,34 +110,41 @@ class FreqTrie:
         return current_node
     
     def get_freq(self, context):
+        """Return the frequency of context."""
         return self.get_context_node(context).freq
     
     def get_fillers(self, context, max_length=float('inf')):
+        """Return generator of fillers of context up to max_length."""
         context_node = self.get_context_node(context)
+        # Set direction: "fw" if slot is after context, "bw" if slot is before context
         direction = 'fw' if context[-1] == '_' else 'bw'
         return self.get_fillers_aux(context_node, direction, max_length)
     
-    def get_fillers_aux(self, current_node, direction, max_length=float('inf'), path=None):
+    def get_fillers_aux(self, context_node, direction, max_length=float('inf'), path=None):
+        """Yield each filler of context_node up to max_length."""
         if path is None:
             path = ['_']
         if len(path) >= max_length:
             return
-        for child in current_node.children:
+        for child in context_node.children:
             new_path = path + [child] if direction == 'fw' else [child] + path
-            child_node = current_node.children[child]
+            child_node = context_node.children[child]
             freq = child_node.freq
             yield (tuple(new_path), freq)
             yield from self.get_fillers_aux(child_node, direction, max_length, new_path)
     
     def get_shared_fillers(self, context_1, context_2, max_length=float('inf')):
-        """Yield each shared filler of context1 and context2.
+        """Return generator of shared fillers of context_1 and context_2 up to max_length.
         
         Arguments:
-            - context1 (string): e.g. 'a _ garden'
-            - context2 (string): e.g. 'this _ lake'
+            context_1 (tuple of strings): e.g. ('_', 'is', 'good')
+            context_2 (tuple of strings): e.g. ('_', 'was', 'here')
         
         Returns:
-            - generator (of strings): e.g. ('beautiful', 'very nice', ...)
+            generator of (filler, freq_1, freq_2) tuples:
+                if e.g. the tuple (('this', '_'), 23, 10) is yielded, then:
+                - 'this' occurred before 'is good' 23 times, and
+                - 'this' occurred before 'was here' 10 times.
         """
         context_node_1 = self.get_context_node(context_1)
         context_node_2 = self.get_context_node(context_2)
@@ -145,25 +152,18 @@ class FreqTrie:
         return self.get_shared_fillers_aux(context_node_1, context_node_2, direction, max_length)
   
     # Recursively yield each shared filler of two context nodes
-    def get_shared_fillers_aux(self, distr_node_1, distr_node_2, direction, max_length=float('inf'), path=None):
-        """Yield each shared branch of `distr_node1` and `distr_node2`.
-    
-        Arguments:
-            - distr_node1 (DistrNode): root of a subtrie
-            - distr_node2 (DistrNode): root of another subtrie
-    
-        Yields:
-            - string: branch that is shared by the two input subtries
+    def get_shared_fillers_aux(self, context_node_1, context_node_2, direction, max_length=float('inf'), path=None):
+        """Yield each shared filler of context_node_1 and context_node_2 up to max_length.
         """
         if path is None:
             path = ['_']
         if len(path) >= max_length:
             return
-        for child in distr_node_1.children:
-            if child in distr_node_2.children:
+        for child in context_node_1.children:
+            if child in context_node_2.children:
                 new_path = path + [child] if direction == 'fw' else [child] + path
-                child_node_1 = distr_node_1.children[child]
-                child_node_2 = distr_node_2.children[child]
+                child_node_1 = context_node_1.children[child]
+                child_node_2 = context_node_2.children[child]
                 freq_1 = child_node_1.freq
                 freq_2 = child_node_2.freq
                 yield (tuple(new_path), freq_1, freq_2)
