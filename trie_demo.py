@@ -112,7 +112,6 @@ class FreqTrie:
     def get_freq(self, context):
         return self.get_context_node(context).freq
     
-    # From here on: contexts and fillers are tup
     def get_fillers(self, context, max_length=float('inf')):
         context_node = self.get_context_node(context)
         direction = 'fw' if context[-1] == '_' else 'bw'
@@ -130,8 +129,7 @@ class FreqTrie:
             yield (tuple(new_path), freq)
             yield from self.get_fillers_aux(child_node, direction, max_length, new_path)
     
-    # Yield each shared filler of two contexts TODO: not str, tup
-    def get_shared_fillers(self, context_1, context_2):
+    def get_shared_fillers(self, context_1, context_2, max_length=float('inf')):
         """Yield each shared filler of context1 and context2.
         
         Arguments:
@@ -144,10 +142,10 @@ class FreqTrie:
         context_node_1 = self.get_context_node(context_1)
         context_node_2 = self.get_context_node(context_2)
         direction = 'fw' if context_1[-1] == '_' else 'bw'
-        return self.get_shared_fillers_aux(context_node_1, context_node_2, direction)
+        return self.get_shared_fillers_aux(context_node_1, context_node_2, direction, max_length)
   
     # Recursively yield each shared filler of two context nodes
-    def get_shared_fillers_aux(self, distr_node_1, distr_node_2, direction, path=None):
+    def get_shared_fillers_aux(self, distr_node_1, distr_node_2, direction, max_length=float('inf'), path=None):
         """Yield each shared branch of `distr_node1` and `distr_node2`.
     
         Arguments:
@@ -159,13 +157,14 @@ class FreqTrie:
         """
         if path is None:
             path = ['_']
+        if len(path) >= max_length:
+            return
         for child in distr_node_1.children:
             if child in distr_node_2.children:
                 new_path = path + [child] if direction == 'fw' else [child] + path
                 child_node_1 = distr_node_1.children[child]
                 child_node_2 = distr_node_2.children[child]
-                if child_node_1.freq > 0 and child_node_2.freq > 0:
-                    freq_1 = child_node_1.freq
-                    freq_2 = child_node_2.freq
-                    yield (tuple(new_path), freq_1, freq_2)
+                freq_1 = child_node_1.freq
+                freq_2 = child_node_2.freq
+                yield (tuple(new_path), freq_1, freq_2)
                 yield from self.get_shared_fillers_aux(child_node_1, child_node_2, direction, new_path)
