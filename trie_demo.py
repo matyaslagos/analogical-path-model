@@ -167,4 +167,4 @@ class FreqTrie:
                 freq_1 = child_node_1.freq
                 freq_2 = child_node_2.freq
                 yield (tuple(new_path), freq_1, freq_2)
-                yield from self.get_shared_fillers_aux(child_node_1, child_node_2, direction, new_path)
+                yield from self.get_shared_fillers_aux(child_node_1, child_node_2, direction, max_length, new_path)
