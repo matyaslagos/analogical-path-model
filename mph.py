@@ -348,6 +348,84 @@ def anl_substs(self, left, right):
         subst_grams_dict[anl_gram] = anl_support
     return sorted(subst_grams_dict.items(), key=lambda x: x[1], reverse=True)
 
+def custom_mean(n, m):
+    return min(n, m)
+
+def custom_mean2(n, m):
+    return math.sqrt(n * m)
+
+def anl_substs_min(self, left, right):
+    anl_bridge_dict = {}
+    left_freq = get_freq(self, left)
+    right_freq = get_freq(self, right)
+    left_substs_dict = defaultdict(lambda: {'distr': [], 'prob': 0, 'norm': 0})
+    right_substs_dict = defaultdict(lambda: {'distr': [], 'prob': 0, 'norm': 0})
+    subst_grams_dict = {}
+    # Calculate P(left || left)
+    anl_rights = list(get_fillers_func(self, left))
+    for anl_right, left_anl_right_freq in anl_rights:
+        anl_right_freq = get_freq(self, anl_right)
+        fw_prob = left_anl_right_freq / left_freq
+        bw_prob = left_anl_right_freq / anl_right_freq
+        left_substs_dict[left]['prob'] += custom_mean(fw_prob, bw_prob)
+        left_substs_dict[left]['distr'].append(left_anl_right_freq ** 2 / (anl_right_freq * left_freq))
+    # Calculate P(right || right)
+    anl_lefts = get_fillers_func(self, right)
+    for anl_left, anl_left_right_freq in anl_lefts:
+        anl_left_freq = get_freq(self, anl_left)
+        fw_prob = anl_left_right_freq / right_freq
+        bw_prob = anl_left_right_freq / anl_left_freq
+        right_substs_dict[right]['prob'] += custom_mean(fw_prob, bw_prob)
+        right_substs_dict[right]['distr'].append(anl_left_right_freq ** 2 / (anl_left_freq * right_freq))
+    # Calculate P(right || anl_right) and P(left || anl_left)
+    # for each (anl_left, anl_right) bridge where anl_dir != dir
+    for anl_right, left_anl_right_freq in anl_rights:
+        anl_right_freq = get_freq(self, anl_right)
+        top_gram_fw_prob = left_anl_right_freq / left_freq
+        top_gram_bw_prob = left_anl_right_freq / anl_right_freq
+        anl_lefts = get_shared_fillers_func(self, anl_right, right)
+        for anl_left, anl_left_anl_right_freq, anl_left_right_freq in anl_lefts:
+            anl_left_freq = get_freq(self, anl_left)
+            middle_gram_fw_prob = anl_left_anl_right_freq / anl_left_freq
+            middle_gram_bw_prob = anl_left_anl_right_freq / anl_right_freq
+            bottom_gram_fw_prob = anl_left_right_freq / left_freq
+            bottom_gram_bw_prob = anl_left_right_freq / anl_right_freq
+            anl_left_prob = custom_mean(middle_gram_fw_prob, top_gram_bw_prob)
+            anl_right_prob = custom_mean(middle_gram_bw_prob, bottom_gram_fw_prob)
+            if anl_left != left:
+                left_substs_dict[anl_left]['prob'] += anl_left_prob
+                left_int_prob = left_anl_right_freq * anl_left_anl_right_freq / (anl_right_freq * anl_left_freq)
+                left_substs_dict[anl_left]['distr'].append(left_int_prob)
+                left_substs_dict[anl_left]['norm'] += anl_left_freq * anl_right_freq
+            if anl_right != right:
+                right_substs_dict[anl_right]['prob'] += anl_right_prob
+                right_int_prob = anl_left_right_freq * anl_left_anl_right_freq / (anl_left_freq * anl_right_freq)
+                right_substs_dict[anl_right]['distr'].append(right_int_prob)
+                right_substs_dict[anl_right]['norm'] += anl_left_freq * anl_right_freq
+            gramify = lambda x: lambda y: context_filler_tuple(self, x, y)
+            if (left, anl_right) not in anl_bridge_dict:
+                top_gram = gramify(left)(anl_right)
+                anl_bridge_dict[(left, anl_right)] = get_freq(self, top_gram)
+            middle_gram = gramify(anl_left)(anl_right)
+            bottom_gram = gramify(anl_left)(right)
+            anl_bridge_dict[(anl_left, anl_right)] = get_freq(self, middle_gram)
+            anl_bridge_dict[(anl_left, right)] = get_freq(self, bottom_gram)
+    # Calculate support for each available analogical gram
+    for anl_left, anl_right in anl_bridge_dict:
+        """
+        left_entropy = norm_entropy_func(self, left_substs_dict[anl_left]['distr'])
+        right_entropy = norm_entropy_func(self, right_substs_dict[anl_right]['distr'])
+        anl_entropy = left_entropy * right_entropy
+        left_diversity = simpson_div_func(self, left_substs_dict[anl_left]['distr'])
+        right_diversity = simpson_div_func(self, right_substs_dict[anl_right]['distr'])
+        anl_diversity = left_diversity * right_diversity
+        """
+        anl_prob = custom_mean2(left_substs_dict[anl_left]['prob'], right_substs_dict[anl_right]['prob'])
+        anl_support = anl_prob
+        anl_gram = context_filler_merge(self, anl_left, anl_right)
+        subst_grams_dict[anl_gram] = anl_support
+    return sorted(subst_grams_dict.items(), key=lambda x: x[1], reverse=True)
+
 def anl_substs_indiv(self, left, right):
     subst_grams_dict = {}
     left_freq = get_freq(self, left)
@@ -533,7 +611,7 @@ def iter_anls(self, word):
         pref, suff = lc(word[:i]), rc(word[i:])
         split_word = context_filler_merge(self, pref, suff)
         try:
-            analogies = anl_substs_indiv(self, pref, suff)
+            analogies = anl_substs_min(self, pref, suff)
             anl_prob = sum(x[1] for x in analogies)
             anl_list.append((split_word, anl_prob, analogies[:10]))
         except:

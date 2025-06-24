@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-
 from collections import defaultdict
+from itertools import product
+import math
 
 #-----------------#
 # Setup functions #
@@ -37,6 +38,9 @@ def freq_trie_setup(corpus):
         freq_trie.insert(sentence)
     return freq_trie
 
+def setup():
+    corpus = txt_to_list('norvig_corpus.txt')
+    return freq_trie_setup(corpus)
 
 #-----------------------------------------#
 # FreqNode and FreqTrie class definitions #
@@ -81,6 +85,7 @@ class FreqTrie:
             (sentence[:i], sentence[i:])
             for i in range(len(sentence) + 1)
         )
+        self.fw_root.freq += len(sentence)
         for prefix, suffix in prefix_suffix_pairs:
             self.fw_root.increment_or_make_branch(suffix)
             self.bw_root.increment_or_make_branch(reversed(prefix))
@@ -108,12 +113,13 @@ class FreqTrie:
             try:
                 current_node = current_node.children[token]
             except KeyError:
-                raise KeyError(f'Context "{' '.join(context)}" not found.')
+                return None
         return current_node
     
     def get_freq(self, context):
         """Return the frequency of context."""
-        return self.get_context_node(context).freq
+        context_node = self.get_context_node(context)
+        return context_node.freq if context_node else 0
     
     def get_fillers(self, context, max_length=float('inf')):
         """Return generator of fillers of context up to max_length."""
@@ -171,68 +177,53 @@ class FreqTrie:
                 yield (tuple(new_path), freq_1, freq_2)
                 yield from self.get_shared_fillers_aux(child_node_1, child_node_2, direction, max_length, new_path)
 
-def context_tuples_merge(self, left_context, right_context):
+def context_tuples_string(self, left_context, right_context):
     return ' '.join(left_context[:-1]) + ' + ' + ' '.join(right_context[1:])
 
-def anl_paths(self, left_context_string, right_context_string):
-    left_context = tuple(left_context_string.split()) + ('_',)
-    ext_left_context = ('_',) + tuple(left_context_string.split())
-    left_context_freq = self.get_freq(left_context)
-    right_context = ('_',) + tuple(right_context_string.split())
-    ext_right_context = tuple(right_context_string.split()) + ('_',)
-    right_context_freq = self.get_freq(right_context)
-    left_context_node = self.get_context_node(left_context)
-    right_context_node = self.get_context_node(right_context)
-    anl_right_contexts = self.get_fillers(left_context, len(right_context))
-    ext_probs = {}
-    for anl_right_context, lc_arc_freq in anl_right_contexts:
-        anl_left_contexts = list(self.get_shared_fillers(anl_right_context, right_context, len(left_context)))
-        anl_right_context_freq = self.get_freq(anl_right_context)
-        if bool(anl_left_contexts) and anl_right_context not in ext_probs:
-            ext_anl_right_context = anl_right_context[1:] + ('_',)
-            ext_right_fillers = self.get_shared_fillers(ext_anl_right_context, ext_right_context, len(left_context))
-            ext_right_prob = 0
-            for ext_right_filler, earc_erf_freq, erc_erf_freq in ext_right_fillers:
-                ext_right_filler_freq = self.get_freq(ext_right_filler)
-                ext_right_prob += (earc_erf_freq * erc_erf_freq) / (anl_right_context_freq * ext_right_filler_freq)
-            ext_probs[anl_right_context] = ext_right_prob
-        for anl_left_context, alc_arc_freq, alc_rc_freq in anl_left_contexts:
-            anl_left_context_freq = self.get_freq(anl_left_context)
-            if anl_left_context not in ext_probs:
-                ext_anl_left_context = ('_',) + anl_left_context[:-1]
-                ext_left_fillers = self.get_shared_fillers(ext_anl_left_context, ext_left_context, len(right_context))
-                ext_left_prob = 0
-                for ext_left_filler, ealc_elf_freq, elc_elf_freq in ext_left_fillers:
-                    ext_left_filler_freq = self.get_freq(ext_left_filler)
-                    ext_left_prob += (ealc_elf_freq * elc_elf_freq) / (anl_left_context_freq * ext_left_filler_freq)
-                ext_probs[anl_left_context] = ext_left_prob
-            anl_path_data = {
-                'middle_edge': (anl_left_context, anl_right_context),
-                'middle_edge_freq': alc_arc_freq,
-                'top_edge': (left_context, anl_right_context),
-                'top_edge_freq': lc_arc_freq,
-                'bottom_edge': (anl_left_context, right_context),
-                'bottom_edge_freq': alc_rc_freq,
-                'left_freq': left_context_freq,
-                'right_freq': right_context_freq,
-                'left_anl_freq': anl_left_context_freq,
-                'right_anl_freq': anl_right_context_freq,
-                'ext_left_prob': ext_probs[anl_left_context],
-                'ext_right_prob': ext_probs[anl_right_context]
-            }
-            yield anl_path_data
+def context_tuples_merge(self, left_context, right_context):
+    return left_context[:-1] + right_context[1:]
 
-def anl_substs(self, left_context_string, right_context_string):
-    anl_paths_data = anl_paths(self, left_context_string, right_context_string)
-    anl_subst_dict = {}
-    for ap_data in anl_paths_data:
-        left_subst, right_subst = ap_data['middle_edge']
-        anl_subst_gram = context_tuples_merge(self, left_subst, right_subst)
-        top_edge_prob = ap_data['top_edge_freq']# / ap_data['left_freq']
-        middle_edge_prob = ap_data['middle_edge_freq'] / ap_data['right_anl_freq']
-        bottom_edge_prob = ap_data['bottom_edge_freq'] / ap_data['left_anl_freq']
-        anl_subst_dict[anl_subst_gram] = top_edge_prob * middle_edge_prob * bottom_edge_prob * (ap_data['ext_left_prob'] * ap_data['ext_right_prob'])
-    return sorted(anl_subst_dict.items(), key=lambda x: x[1], reverse=True)
+def anl_paths(self, source_tuple, target_tuple):
+    source_freq = self.get_freq(source_tuple)
+    target_freq = self.get_freq(target_tuple)
+    yielded_paths = set()
+    anl_targets = self.get_fillers(source_tuple, len(target_tuple))
+    for anl_target_tuple, source_anl_target_freq in anl_targets:
+        anl_target_freq = self.get_freq(anl_target_tuple)
+        if (source_tuple, anl_target_tuple) not in yielded_paths:
+            path_data = {
+                'source_subst': source_tuple,
+                'target_subst': anl_target_tuple,
+                'joint_freq': source_anl_target_freq,
+                'source_freq': source_freq,
+                'target_freq': anl_target_freq
+            }
+            yield path_data
+            yielded_paths.add((source_tuple, anl_target_tuple))
+        anl_sources = self.get_shared_fillers(anl_target_tuple, target_tuple, len(source_tuple))
+        for anl_source_tuple, anl_source_anl_target_freq, anl_source_target_freq in anl_sources:
+            anl_source_freq = self.get_freq(anl_source_tuple)
+            if (anl_source_tuple, anl_target_tuple) not in yielded_paths:
+                path_data = {
+                    'source_subst': anl_source_tuple,
+                    'target_subst': anl_target_tuple,
+                    'joint_freq': anl_source_anl_target_freq,
+                    'source_freq': anl_source_freq,
+                    'target_freq': anl_target_freq
+                }
+                yield path_data
+                yielded_paths.add((anl_source_tuple, anl_target_tuple))
+            if (anl_source_tuple, target_tuple) not in yielded_paths:
+                path_data = {
+                    'source_subst': anl_source_tuple,
+                    'target_subst': target_tuple,
+                    'joint_freq': anl_source_target_freq,
+                    'source_freq': anl_source_freq,
+                    'target_freq': target_freq
+                }
+                yield path_data
+                yielded_paths.add((anl_source_tuple, target_tuple))
+            
 
 def rc(self, context_string):
     return ('_',) + tuple(context_string.split())
@@ -240,25 +231,18 @@ def rc(self, context_string):
 def lc(self, context_string):
     return tuple(context_string.split()) + ('_',)
 
-def subst(self, source_context_string, target_context_string):
-    right_source, right_target = rc(self, source_context_string), rc(self, target_context_string)
-    left_source, left_target = lc(self, source_context_string), lc(self, target_context_string)
-    right_fillers = self.get_shared_fillers(left_source, left_target)
-    source_freq = self.get_freq(left_source)
-    left_subst_prob = 0
-    for right_filler, source_filler_freq, target_filler_freq in right_fillers:
-        filler_freq = self.get_freq(right_filler)
-        fw_step = source_filler_freq / left_source_freq
-        bw_step = target_filler_freq / filler_freq
-        left_subst_prob += fw_step * bw_step
-    left_fillers = self.get_shared_fillers(right_source, right_target)
-    right_subst_prob = 0
-    pass
+def path_mean(n, m):
+    return min(n, m)
 
-def anl_repls(self, source_context_string):
-    
+def subst_mean(n, m):
+    return min(n, m)
+
+def anl_mean(n, m):
+    return min(n, m)
+
+def anl_substs(self, source_context_string):
     right_source = rc(self, source_context_string)
-    
+    right_source_freq = self.get_freq(right_source)
     left_fillers = self.get_fillers(right_source)
     right_subst_dict = defaultdict(float)
     for left_filler, fw_step_freq in left_fillers:
@@ -266,27 +250,210 @@ def anl_repls(self, source_context_string):
         right_substs = self.get_fillers(left_filler, len(right_source))
         for right_subst, bw_step_freq in right_substs:
             right_subst_freq = self.get_freq(right_subst)
-            fw_prob = fw_step_freq / left_filler_freq
-            bw_prob = bw_step_freq / right_subst_freq
-            right_subst_dict[right_subst] += min(fw_prob, bw_prob)
-    
+            fw_prob = fw_step_freq / (left_filler_freq)
+            bw_prob = bw_step_freq / (right_subst_freq)
+            right_subst_dict[right_subst] += path_mean(fw_prob, bw_prob)
     left_source = lc(self, source_context_string)
-    
-    right_fillers = self.get_fillers(left_source)
+    left_source_freq = self.get_freq(left_source)
     left_subst_dict = defaultdict(float)
-    for right_filler, fw_step_freq in right_fillers:
-        right_filler_freq = self.get_freq(right_filler)
-        left_substs = self.get_fillers(right_filler, len(left_source))
-        for left_subst, bw_step_freq in left_substs:
-            left_subst_freq = self.get_freq(left_subst)
-            fw_prob = fw_step_freq / right_filler_freq
-            bw_prob = bw_step_freq / left_subst_freq
-            left_subst_dict[left_subst] += min(fw_prob, bw_prob)
+    for right_subst, right_subst_score in right_subst_dict.items():
+        left_subst = right_subst[1:] + ('_',)
+        left_subst_freq = self.get_freq(left_subst)
+        right_fillers = self.get_shared_fillers(left_subst, left_source)
+        for right_filler, bw_step_freq, fw_step_freq in right_fillers:
+            right_filler_freq = self.get_freq(right_filler)
+            fw_prob = fw_step_freq / (right_filler_freq)
+            bw_prob = bw_step_freq / (left_subst_freq)
+            left_subst_dict[left_subst] += path_mean(fw_prob, bw_prob)
     subst_dict = {}
-    for right_subst, right_prob in right_subst_dict.items():
-        if right_subst[1:] + ('_',) in left_subst_dict:
-            subst_dict[right_subst[1:]] = min(right_prob, left_subst_dict[right_subst[1:] + ('_',)])
+    for left_subst, left_subst_score in left_subst_dict.items():
+        subst_dict[left_subst[:-1]] = subst_mean(left_subst_score, right_subst_dict[('_',) + left_subst[:-1]])
     return sorted(subst_dict.items(), key=lambda x: x[1], reverse=True)
 
-def min_anls(self, source_string, target_string):
+def anl_phrases(self, source, target):
+    anl_phrase_set = set()
+    anl_source_dict = {}
+    anl_target_dict = {}
+    source_context = source + ('_',)
+    target_context = ('_',) + target
+    anl_path_list = anl_paths(self, source_context, target_context)
+    for path_data in anl_path_list:
+        anl_source = path_data['source_subst'][:-1]
+        anl_target = path_data['target_subst'][1:]
+        anl_phrase_set.add((anl_source, anl_target))
+        if anl_source not in anl_source_dict:
+            score = subst_score(self, anl_source, source)
+            anl_source_dict[anl_source] = score
+        if anl_target not in anl_target_dict:
+            score = subst_score(self, anl_target, target)
+            anl_target_dict[anl_target] = score
+    return sorted(list(((anl_source, anl_target), min(anl_source_dict[anl_source], anl_target_dict[anl_target])) for anl_source, anl_target in anl_phrase_set), key=lambda x: x[1], reverse=True)
+
+def indir_anls(self, source, target):
+    anl_phrase_dict = defaultdict(float)
+    alt_sources = anl_substs(self, source)[:5]
+    alt_targets = anl_substs(self, target)[:5]
+    for alt_source_data, alt_target_data in product(alt_sources, alt_targets):
+        alt_source, alt_source_score = alt_source_data
+        alt_target, alt_target_score = alt_target_data
+        score = math.sqrt(alt_source_score * alt_target_score)
+        anl_phrase_list = anl_phrases(self, alt_source, alt_target)
+        for anl_phrase, anl_phrase_score in anl_phrase_list:
+            anl_phrase_dict[anl_phrase] += min(anl_phrase_score, score)
+    return sorted(anl_phrase_dict.items(), key=lambda x: x[1], reverse=True)
+
+def subst_score(self, subst_tuple, orig_tuple):
+    left_subst_score = 0
+    subst_left, orig_left = subst_tuple + ('_',), orig_tuple + ('_',)
+    subst_freq = self.get_freq(subst_left)
+    shared_contexts = self.get_shared_fillers(subst_left, orig_left)
+    for shared_context, subst_context_freq, orig_context_freq in shared_contexts:
+        context_freq = self.get_freq(shared_context)
+        context_given_subst = subst_context_freq / subst_freq
+        orig_given_context = orig_context_freq / context_freq
+        left_subst_score += path_mean(context_given_subst, orig_given_context)
+    right_subst_score = 0
+    subst_right, orig_right = ('_',) + subst_tuple, ('_',) + orig_tuple
+    shared_contexts = self.get_shared_fillers(subst_right, orig_right)
+    for shared_context, subst_context_freq, orig_context_freq in shared_contexts:
+        context_freq = self.get_freq(shared_context)
+        context_given_subst = subst_context_freq / subst_freq
+        orig_given_context = orig_context_freq / context_freq
+        right_subst_score += path_mean(context_given_subst, orig_given_context)
+    return subst_mean(left_subst_score, right_subst_score)
+
+def analogies(self, word):
+    word_freq = self.get_freq(lc(self, word))
+    best_anls = anl_substs(self, word)[1:11]
+    anl_list = [
+        (anl[0], self.get_freq(anl[0] + ('_',)))
+        for anl in best_anls
+    ]
+    max_len = max(len(anl[0]) for anl, freq in anl_list)
+    print(f'Ten best analogies for "{word}" ({word_freq}):')
+    for anl, freq in anl_list:
+        space = ' ' * (max_len - len(anl[0]) + 1)
+        print(f'- "{anl[0]}"{space}({freq})')
+
+def min_anls(self, target):
+    """Target is undirected, i.e. ('apple',)."""
+    fw_target, bw_target = target + ('_',), ('_',) + target
+    fw_anls = defaultdict(float)
+    for anl, context, score in min_anls_dir(self, fw_target):
+        fw_anls[anl] += score
+    bw_anls = defaultdict(float)
+    for anl, context, score in min_anls_dir(self, bw_target):
+        bw_anls[anl] += score
+    anls = {}
+    for anl in fw_anls:
+        if anl in bw_anls:
+            anls[anl] = subst_mean(fw_anls[anl], bw_anls[anl])
+    return sorted(anls.items(), key=lambda x: x[1], reverse=True)
+
+def min_contexts(self, target):
+    """Target is undirected, i.e. ('apple',)."""
+    fw_target, bw_target = target + ('_',), ('_',) + target
+    contexts = defaultdict(float)
+    for anl, context, score in min_anls_dir(self, fw_target):
+        if anl != target:
+            contexts[context] = max(contexts[context], score)
+    for anl, context, score in min_anls_dir(self, bw_target):
+        if anl != target:
+            contexts[context] = max(contexts[context], score)
+    return sorted(contexts.items(), key=lambda x: x[1], reverse=True)
+
+def min_anls_dir(self, target):
+    """Target is directed, i.e. ('apple', '_') or ('_', 'apple')."""
+    target_freq = self.get_freq(target)
+    contexts = self.get_fillers(target)
+    for context, context_target_freq in contexts:
+        context_freq = self.get_freq(context)
+        sources = self.get_fillers(context, len(target))
+        for source, context_source_freq in sources:
+            source_freq = self.get_freq(source)
+            source_to_context_prob = context_source_freq / source_freq
+            context_to_target_prob = context_target_freq / context_freq
+            source = source[:-1] if source.index('_') else source[1:]
+            yield (source, context, path_mean(source_to_context_prob, context_to_target_prob))
+
+def anl_paths_dir(self, target):
+    """Target is directed, i.e. ('apple', '_') or ('_', 'apple')."""
+    target_freq = self.get_freq(target)
+    contexts = self.get_fillers(target)
+    for context, context_target_freq in contexts:
+        context_freq = self.get_freq(context)
+        sources = self.get_fillers(context, len(target))
+        for source, context_source_freq in sources:
+            source_freq = self.get_freq(source)
+            src_to_cxt_prob = context_source_freq / source_freq
+            cxt_to_trg_prob = context_target_freq / context_freq
+            source = source[:-1] if source.index('_') else source[1:]
+            yield (source, context, src_to_cxt_prob, cxt_to_trg_prob)
+
+def mixed_anls(self, weighted_phraselist):
+    """
+    Finds analogies for the mixed distribution of weighted_phraselist.
+    
+    Arguments:
+        weighted_phraselist (list): [(tuple, float)], where tuple is a tuple
+            of strings, e.g. ('our', 'teacher'), and float is its weight, i.e.
+            its substitutability score by some target phrase
+    
+    Returns:
+        ...
+    """
+    # Aggregate probabilities using left contexts
+    left_halves = ((('_',) + phrase, weight) for phrase, weight in weighted_phraselist)
+    left_src_to_cxt = defaultdict(lambda: {})
+    left_cxt_to_trg = defaultdict(float)
+    for target, weight in left_halves:
+        anl_paths = anl_paths_dir(self, target)
+        for source, context, src_to_cxt_prob, cxt_to_trg_prob in anl_paths:
+            left_src_to_cxt[source][context] = src_to_cxt_prob
+            left_cxt_to_trg[context] += cxt_to_trg_prob
+    # Aggregate probabilities using right contexts
+    right_halves = ((phrase + ('_',), weight) for phrase, weight in weighted_phraselist)
+    right_src_to_cxt = defaultdict(lambda: {})
+    right_cxt_to_trg = defaultdict(float)
+    for target, weight in right_halves:
+        anl_paths = anl_paths_dir(self, target)
+        for source, context, src_to_cxt_prob, cxt_to_trg_prob in anl_paths:
+            right_src_to_cxt[source][context] = src_to_cxt_prob
+            right_cxt_to_trg[context] += cxt_to_trg_prob
+    # Compute path means for left contexts
+    left_anls = defaultdict(float)
+    for source in left_src_to_cxt:
+        for context in left_src_to_cxt[source]:
+            left_anls[source] += path_mean(
+                left_src_to_cxt[source][context],
+                left_cxt_to_trg[context]
+            )
+    # Compute path means for right contexts
+    right_anls = defaultdict(float)
+    for source in right_src_to_cxt:
+        for context in right_src_to_cxt[source]:
+            right_anls[source] += path_mean(
+                right_src_to_cxt[source][context],
+                right_cxt_to_trg[context]
+            )
+    # Calculate bilateral substitutability
+    anls = {}
+    for anl in left_anls:
+        if anl in right_anls:
+            anls[anl] = subst_mean(left_anls[anl], right_anls[anl])
+    
+    return sorted(anls.items(), key=lambda x: x[1], reverse=True)
+
+def bigram_anls(self, bigram):
+    s1, s2 = tuple(bigram.split()[:1]), tuple(bigram.split()[1:])
+    s1_anls = min_anls(self, s1)[:30]
+    s2_anls = min_anls(self, s2)[:30]
+    anls = {}
+    for s1_anl, s1_score in s1_anls:
+        for s2_anl, s2_score in s2_anls:
+            if self.get_freq(s1_anl + s2_anl + ('_',)) > 0:
+                anls[s1_anl + s2_anl] = anl_mean(s1_score, s2_score)
+    return sorted(anls.items(), key=lambda x: x[1], reverse=True)
+
+def pmi(self, dir_word, dir_context):
     pass
