@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 from collections import defaultdict
 from itertools import product
+from string import punctuation
 import math
+import csv
 
 #-----------------#
 # Setup functions #
@@ -21,10 +23,10 @@ def txt_to_list(filename):
     """
     with open(filename, mode='r', encoding='utf-8-sig') as file:
         lines = file.readlines()
-    return [('<',) + tuple(line.strip().split()) + ('>',) for line in lines] 
+    return [('<',) + tuple(line.strip().split()) + ('>',) for line in lines]
 
 # Make frequency trie out of corpus
-def freq_trie_setup(corpus):
+def freqtrie_setup(corpus):
     """Make a frequency trie data structure from corpus.
     
     Argument:
@@ -51,15 +53,17 @@ class FreqNode:
         self.children = {}
         self.freq = 0
     
-    def increment_or_make_branch(self, token_tuple):
-        """Increment the frequency of token_tuple or make a new branch for it."""
+    def increment_or_make_branch(self, token_tuple, count=1):
+        """Increment the frequency of token_tuple or make a new branch for it.
+        """
         current_node = self
         for token in token_tuple:
             current_node = current_node.get_or_make_child(token)
-            current_node.freq += 1
+            current_node.freq += count
     
     def get_or_make_child(self, token):
-        """Return the child called token or make a new child called token."""
+        """Return the child called token or make a new child called token.
+        """
         if token not in self.children:
             self.children[token] = FreqNode()
         return self.children[token]
@@ -70,7 +74,7 @@ class FreqTrie:
         self.bw_root = FreqNode()
     
     # Record distribution information about a sentence
-    def insert(self, sentence):
+    def insert(self, sentence, count=1):
         """Record all contexts and fillers of sentence into trie.
         
         Argument:
@@ -85,17 +89,18 @@ class FreqTrie:
             (sentence[:i], sentence[i:])
             for i in range(len(sentence) + 1)
         )
-        self.fw_root.freq += len(sentence)
+        self.fw_root.freq += len(sentence) * count
         for prefix, suffix in prefix_suffix_pairs:
-            self.fw_root.increment_or_make_branch(suffix)
-            self.bw_root.increment_or_make_branch(reversed(prefix))
+            self.fw_root.increment_or_make_branch(suffix, count)
+            self.bw_root.increment_or_make_branch(reversed(prefix), count)
     
     def get_context_node(self, context):
         """Return the node corresponding to a context.
         
         Argument:
             context (tuple of strings): of the form ('this', 'is', '_') or
-            ('_', 'is', 'good'), with '_' indicating the empty slot.
+            ('_', 'is', 'good'), with '_' indicating the empty slot. If no
+            slot is indicated, defaults to ('this', 'is', '_')
         
         Returns:
             FreqNode corresponding to context.
@@ -105,9 +110,12 @@ class FreqTrie:
             current_node = self.fw_root
             token_sequence = context[:-1]
         # If right context, look up reversed token sequence in backward trie
-        else:
+        elif context[0] == '_':
             current_node = self.bw_root
             token_sequence = reversed(context[1:])
+        else:
+            current_node = self.fw_root
+            token_sequence = context
         # General lookup
         for token in token_sequence:
             try:
@@ -117,31 +125,36 @@ class FreqTrie:
         return current_node
     
     def get_freq(self, context):
-        """Return the frequency of context."""
+        """Return the frequency of context.
+        """
         context_node = self.get_context_node(context)
         return context_node.freq if context_node else 0
     
-    def get_fillers(self, context, max_length=float('inf')):
-        """Return generator of fillers of context up to max_length."""
+    def get_fillers(self, context, max_length=float('inf'), only_completions=False):
+        """Return generator of fillers of context up to max_length.
+        """
         context_node = self.get_context_node(context)
         # Set direction: "fw" if slot is after context, "bw" if slot is before context
         direction = 'fw' if context[-1] == '_' else 'bw'
-        return self.get_fillers_aux(context_node, direction, max_length)
+        return self.get_fillers_aux(context_node, direction, max_length, only_completions, path=['_'])
     
-    def get_fillers_aux(self, context_node, direction, max_length=float('inf'), path=None):
-        """Yield each filler of context_node up to max_length."""
-        if path is None:
-            path = ['_']
+    def get_fillers_aux(self, context_node, direction, max_length, only_completions, path):
+        """Yield each filler of context_node up to max_length.
+        """
         if len(path) >= max_length:
             return
         for child in context_node.children:
             new_path = path + [child] if direction == 'fw' else [child] + path
             child_node = context_node.children[child]
             freq = child_node.freq
-            yield (tuple(new_path), freq)
-            yield from self.get_fillers_aux(child_node, direction, max_length, new_path)
+            if not only_completions:
+                yield (tuple(new_path), freq)
+            else:
+                if new_path[0] == '<' or new_path[-1] == '>':
+                    yield (tuple(new_path), freq)
+            yield from self.get_fillers_aux(child_node, direction, max_length, only_completions, new_path)
     
-    def get_shared_fillers(self, context_1, context_2, max_length=float('inf')):
+    def get_shared_fillers(self, context_1, context_2, max_length=float('inf'), only_completions=False):
         """Return generator of shared fillers of context_1 and context_2 up to max_length.
         
         Arguments:
@@ -157,14 +170,14 @@ class FreqTrie:
         context_node_1 = self.get_context_node(context_1)
         context_node_2 = self.get_context_node(context_2)
         direction = 'fw' if context_1[-1] == '_' else 'bw'
-        return self.get_shared_fillers_aux(context_node_1, context_node_2, direction, max_length)
+        return self.get_shared_fillers_aux(context_node_1, context_node_2, direction,
+                                           max_length, only_completions, path=['_'])
   
     # Recursively yield each shared filler of two context nodes
-    def get_shared_fillers_aux(self, context_node_1, context_node_2, direction, max_length=float('inf'), path=None):
+    def get_shared_fillers_aux(self, context_node_1, context_node_2, direction,
+                               max_length, only_completions, path):
         """Yield each shared filler of context_node_1 and context_node_2 up to max_length.
         """
-        if path is None:
-            path = ['_']
         if len(path) >= max_length:
             return
         for child in context_node_1.children:
@@ -174,62 +187,12 @@ class FreqTrie:
                 child_node_2 = context_node_2.children[child]
                 freq_1 = child_node_1.freq
                 freq_2 = child_node_2.freq
-                yield (tuple(new_path), freq_1, freq_2)
-                yield from self.get_shared_fillers_aux(child_node_1, child_node_2, direction, max_length, new_path)
-
-def context_tuples_string(self, left_context, right_context):
-    return ' '.join(left_context[:-1]) + ' + ' + ' '.join(right_context[1:])
-
-def context_tuples_merge(self, left_context, right_context):
-    return left_context[:-1] + right_context[1:]
-
-def anl_paths(self, source_tuple, target_tuple):
-    source_freq = self.get_freq(source_tuple)
-    target_freq = self.get_freq(target_tuple)
-    yielded_paths = set()
-    anl_targets = self.get_fillers(source_tuple, len(target_tuple))
-    for anl_target_tuple, source_anl_target_freq in anl_targets:
-        anl_target_freq = self.get_freq(anl_target_tuple)
-        if (source_tuple, anl_target_tuple) not in yielded_paths:
-            path_data = {
-                'source_subst': source_tuple,
-                'target_subst': anl_target_tuple,
-                'joint_freq': source_anl_target_freq,
-                'source_freq': source_freq,
-                'target_freq': anl_target_freq
-            }
-            yield path_data
-            yielded_paths.add((source_tuple, anl_target_tuple))
-        anl_sources = self.get_shared_fillers(anl_target_tuple, target_tuple, len(source_tuple))
-        for anl_source_tuple, anl_source_anl_target_freq, anl_source_target_freq in anl_sources:
-            anl_source_freq = self.get_freq(anl_source_tuple)
-            if (anl_source_tuple, anl_target_tuple) not in yielded_paths:
-                path_data = {
-                    'source_subst': anl_source_tuple,
-                    'target_subst': anl_target_tuple,
-                    'joint_freq': anl_source_anl_target_freq,
-                    'source_freq': anl_source_freq,
-                    'target_freq': anl_target_freq
-                }
-                yield path_data
-                yielded_paths.add((anl_source_tuple, anl_target_tuple))
-            if (anl_source_tuple, target_tuple) not in yielded_paths:
-                path_data = {
-                    'source_subst': anl_source_tuple,
-                    'target_subst': target_tuple,
-                    'joint_freq': anl_source_target_freq,
-                    'source_freq': anl_source_freq,
-                    'target_freq': target_freq
-                }
-                yield path_data
-                yielded_paths.add((anl_source_tuple, target_tuple))
-            
-
-def rc(self, context_string):
-    return ('_',) + tuple(context_string.split())
-
-def lc(self, context_string):
-    return tuple(context_string.split()) + ('_',)
+                if not only_completions:
+                    yield (tuple(new_path), freq_1, freq_2)
+                else:
+                    if new_path[0] == '<' or new_path[-1] == '>':
+                        yield (tuple(new_path), freq_1, freq_2)
+                yield from self.get_shared_fillers_aux(child_node_1, child_node_2, direction, max_length, only_completions, new_path)
 
 def path_mean(n, m):
     return min(n, m)
@@ -270,58 +233,6 @@ def anl_substs(self, source_context_string):
         subst_dict[left_subst[:-1]] = subst_mean(left_subst_score, right_subst_dict[('_',) + left_subst[:-1]])
     return sorted(subst_dict.items(), key=lambda x: x[1], reverse=True)
 
-def anl_phrases(self, source, target):
-    anl_phrase_set = set()
-    anl_source_dict = {}
-    anl_target_dict = {}
-    source_context = source + ('_',)
-    target_context = ('_',) + target
-    anl_path_list = anl_paths(self, source_context, target_context)
-    for path_data in anl_path_list:
-        anl_source = path_data['source_subst'][:-1]
-        anl_target = path_data['target_subst'][1:]
-        anl_phrase_set.add((anl_source, anl_target))
-        if anl_source not in anl_source_dict:
-            score = subst_score(self, anl_source, source)
-            anl_source_dict[anl_source] = score
-        if anl_target not in anl_target_dict:
-            score = subst_score(self, anl_target, target)
-            anl_target_dict[anl_target] = score
-    return sorted(list(((anl_source, anl_target), min(anl_source_dict[anl_source], anl_target_dict[anl_target])) for anl_source, anl_target in anl_phrase_set), key=lambda x: x[1], reverse=True)
-
-def indir_anls(self, source, target):
-    anl_phrase_dict = defaultdict(float)
-    alt_sources = anl_substs(self, source)[:5]
-    alt_targets = anl_substs(self, target)[:5]
-    for alt_source_data, alt_target_data in product(alt_sources, alt_targets):
-        alt_source, alt_source_score = alt_source_data
-        alt_target, alt_target_score = alt_target_data
-        score = math.sqrt(alt_source_score * alt_target_score)
-        anl_phrase_list = anl_phrases(self, alt_source, alt_target)
-        for anl_phrase, anl_phrase_score in anl_phrase_list:
-            anl_phrase_dict[anl_phrase] += min(anl_phrase_score, score)
-    return sorted(anl_phrase_dict.items(), key=lambda x: x[1], reverse=True)
-
-def subst_score(self, subst_tuple, orig_tuple):
-    left_subst_score = 0
-    subst_left, orig_left = subst_tuple + ('_',), orig_tuple + ('_',)
-    subst_freq = self.get_freq(subst_left)
-    shared_contexts = self.get_shared_fillers(subst_left, orig_left)
-    for shared_context, subst_context_freq, orig_context_freq in shared_contexts:
-        context_freq = self.get_freq(shared_context)
-        context_given_subst = subst_context_freq / subst_freq
-        orig_given_context = orig_context_freq / context_freq
-        left_subst_score += path_mean(context_given_subst, orig_given_context)
-    right_subst_score = 0
-    subst_right, orig_right = ('_',) + subst_tuple, ('_',) + orig_tuple
-    shared_contexts = self.get_shared_fillers(subst_right, orig_right)
-    for shared_context, subst_context_freq, orig_context_freq in shared_contexts:
-        context_freq = self.get_freq(shared_context)
-        context_given_subst = subst_context_freq / subst_freq
-        orig_given_context = orig_context_freq / context_freq
-        right_subst_score += path_mean(context_given_subst, orig_given_context)
-    return subst_mean(left_subst_score, right_subst_score)
-
 def analogies(self, word):
     word_freq = self.get_freq(lc(self, word))
     best_anls = anl_substs(self, word)[1:11]
@@ -350,18 +261,6 @@ def min_anls(self, target):
             anls[anl] = subst_mean(fw_anls[anl], bw_anls[anl])
     return sorted(anls.items(), key=lambda x: x[1], reverse=True)
 
-def min_contexts(self, target):
-    """Target is undirected, i.e. ('apple',)."""
-    fw_target, bw_target = target + ('_',), ('_',) + target
-    contexts = defaultdict(float)
-    for anl, context, score in min_anls_dir(self, fw_target):
-        if anl != target:
-            contexts[context] = max(contexts[context], score)
-    for anl, context, score in min_anls_dir(self, bw_target):
-        if anl != target:
-            contexts[context] = max(contexts[context], score)
-    return sorted(contexts.items(), key=lambda x: x[1], reverse=True)
-
 def min_anls_dir(self, target):
     """Target is directed, i.e. ('apple', '_') or ('_', 'apple')."""
     target_freq = self.get_freq(target)
@@ -377,7 +276,8 @@ def min_anls_dir(self, target):
             yield (source, context, path_mean(source_to_context_prob, context_to_target_prob))
 
 def anl_paths_dir(self, target):
-    """Target is directed, i.e. ('apple', '_') or ('_', 'apple')."""
+    """Target is directed, i.e. ('apple', '_') or ('_', 'apple').
+    """
     target_freq = self.get_freq(target)
     contexts = self.get_fillers(target)
     for context, context_target_freq in contexts:
@@ -391,8 +291,7 @@ def anl_paths_dir(self, target):
             yield (source, context, src_to_cxt_prob, cxt_to_trg_prob)
 
 def mixed_anls(self, weighted_phraselist):
-    """
-    Finds analogies for the mixed distribution of weighted_phraselist.
+    """Finds analogies for the mixed distribution of weighted_phraselist.
     
     Arguments:
         weighted_phraselist (list): [(tuple, float)], where tuple is a tuple
@@ -455,5 +354,162 @@ def bigram_anls(self, bigram):
                 anls[s1_anl + s2_anl] = anl_mean(s1_score, s2_score)
     return sorted(anls.items(), key=lambda x: x[1], reverse=True)
 
-def pmi(self, dir_word, dir_context):
-    pass
+def pmi(self, left_seq, right_seq):
+    total = self.fw_root.freq
+    joint_prob = self.get_freq(left_seq[:-1] + right_seq[1:]) / total
+    left_prob = self.get_freq(left_seq) / total
+    right_prob = self.get_freq(right_seq) / total
+    try:
+        p = math.log(joint_prob ** 3 / (left_prob * right_prob), 2)
+    except:
+        p = 0
+    return p
+
+def pmi_contexts(self, seq):
+    context_dict = {}
+    for filler, freq in self.get_fillers(seq, max_length=2):
+        context_dict[filler] = pmi(self, seq, filler)
+    return sorted(context_dict.items(), key=lambda x: x[1], reverse=True)
+
+def rem_distr(self, source, target):
+    source_freq = self.get_freq(source)
+    target_freq = self.get_freq(target)
+    kappa = 0
+    shared_contexts = self.get_shared_fillers(
+        ('_',) + source, ('_',) + target, max_length=2
+    )
+    for context, context_source_freq, context_target_freq in shared_contexts:
+        source_to_context_prob = context_source_freq / source_freq
+        target_to_context_prob = context_target_freq / target_freq
+        kappa += min(source_to_context_prob, target_to_context_prob)
+    prob_dict = {}
+    source_contexts = self.get_fillers(('_',) + source, max_length=2)
+    for context, context_source_freq in source_contexts:
+        context_target_freq = self.get_freq(context[:-1] + target)
+        source_to_context_prob = context_source_freq / source_freq
+        target_to_context_prob = context_target_freq / target_freq
+        min_of_probs = min(source_to_context_prob, target_to_context_prob)
+        prob_dict[context] = (source_to_context_prob - min_of_probs) / (1 - kappa)
+    return sorted(prob_dict.items(), key=lambda x: x[1], reverse=True)
+
+def context_shift(self, target, source):
+    source_freq = self.get_freq(source)
+    target_freq = self.get_freq(target)
+    shift_dict = {}
+    source_contexts = self.get_fillers(source + ('_',), max_length=2)
+    for context, context_source_freq in source_contexts:
+        context_target_freq = self.get_freq(target + context[1:])
+        source_to_context_prob = context_source_freq / source_freq + 0.000001
+        target_to_context_prob = context_target_freq / target_freq + 0.000001
+        log_of_probs = math.log(target_to_context_prob / source_to_context_prob, 2)
+        shift_dict[context] = log_of_probs
+    target_contexts = self.get_fillers(target + ('_',), max_length=2)
+    for context, context_target_freq in target_contexts:
+        if context in shift_dict:
+            continue
+        context_source_freq = self.get_freq(source + context[1:])
+        source_to_context_prob = context_source_freq / source_freq + 0.000001
+        target_to_context_prob = context_target_freq / target_freq + 0.000001
+        log_of_probs = math.log(target_to_context_prob / source_to_context_prob, 2)
+        shift_dict[context] = log_of_probs
+    return sorted(shift_dict.items(), key=lambda x: x[1], reverse=True)
+
+# ---------- #
+# Morphology #
+# ---------- #
+
+# Setup
+
+def csv_to_wordfreqdict(filename):
+    """Import filename as a dict of words (tuples of characters) with int values.
+    """
+    with open(filename, newline='', encoding='utf-8-sig') as file:
+        reader = csv.DictReader(file)
+        clean_word = lambda s: ('<',) + tuple(s.strip(punctuation).lower()) + ('>',)
+        return {clean_word(row['key']): int(row['value']) for row in reader}
+
+def freqtrie_setup_counted(sequence_freq_dict):
+    dt = FreqTrie()
+    most_frequent_items = sorted(
+        sequence_freq_dict.items(),
+        key=lambda x: x[1],
+        reverse=True
+    )[:50000]
+    for sequence, count in most_frequent_items:
+        dt.insert(sequence, count)
+    return dt
+
+def entropy(score_list):
+    total = sum(score_list)
+    norm = lambda x: x / total
+    return sum(norm(score) * math.log(1 / norm(score), 2) for score in score_list)
+
+def morph_anls(self, target, unseen=lambda x: False):
+    """Target is signed string, i.e. '<kalap' or 'jaim>'.
+    """
+    fw_target = tuple(target) + ('_',)
+    fw_anls = defaultdict(float)
+    for anl, context, score in morph_anls_dir(self, fw_target, unseen):
+        fw_anls[anl] += score
+    bw_target = ('_',) + tuple(target)
+    bw_anls = defaultdict(float)
+    for anl, context, score in morph_anls_dir(self, bw_target, unseen):
+        bw_anls[anl] += score
+    anls = {}
+    if '<' in target:
+        anls = fw_anls
+    elif '>' in target:
+        anls = bw_anls
+    else:
+        for fw_anl in fw_anls:
+            if fw_anl in bw_anls:
+                anls[fw_anl] = subst_mean(fw_anls[fw_anl], bw_anls[fw_anl])
+    
+    return sorted(anls.items(), key=lambda x: x[1], reverse=True)
+
+def morph_anls_dir(self, target, unseen):
+    """Target is directed, i.e. ('apple', '_') or ('_', 'apple').
+    """
+    target_freq = self.get_freq(target)
+    contexts = self.get_fillers(target, max_length=5)
+    for context, context_target_freq in contexts:
+        if unseen(context):
+            context_target_freq = 0
+        context_freq = self.get_freq(context)
+        if '<' in target or '>' in target:
+            sources = self.get_fillers(context, only_completions=True)
+        else:
+            sources = self.get_fillers(context, max_length=5)
+        for source, context_source_freq in sources:
+            source_freq = self.get_freq(source)
+            source_to_context_prob = context_source_freq / source_freq
+            context_to_target_prob = context_target_freq / target_freq
+            source = source[:-1] if source.index('_') else source[1:]
+            yield (source, context, path_mean(source_to_context_prob, context_to_target_prob))
+
+def morph_anl_pairs(dt, c1, c2):
+    anls = {('-', '-'): 0}
+    startswith_c2 = lambda x: x[1:len(c2)] == tuple(c2)[:-1]
+    endswith_c1 = lambda x: x[-len(c1):-1] == tuple(c1)[1:]
+    try:
+        c1_anls = morph_anls(dt, c1, unseen=startswith_c2)[:30]
+        c2_anls = morph_anls(dt, c2, unseen=endswith_c1)[:30]
+    except:
+        return list(anls.items())
+    for c1_data, c2_data in product(c1_anls, c2_anls):
+        c1_anl, c1_score = c1_data
+        c2_anl, c2_score = c2_data
+        if c1_anl == tuple(c1) and c2_anl == tuple(c2):
+            continue
+        if dt.get_freq(c1_anl + c2_anl) > 0:
+            anls[(c1_anl, c2_anl)] = anl_mean(c1_score, c2_score)
+    return sorted(anls.items(), key=lambda x: x[1], reverse=True)
+
+def morph_anls_iter(dt, word):
+    anls = {}
+    constituent_pairs = ((word[:i], word[i:]) for i in range(1, len(word) + 1))
+    for c1, c2 in constituent_pairs:
+        anl_data = morph_anl_pairs(dt, '<' + c1, c2 + '>')
+        anls[(c1, c2)] = (sum(anl[1] for anl in anl_data), anl_data[:10])
+    return anls
+
