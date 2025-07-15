@@ -1,0 +1,4 @@
+with open('/Users/matyaslagos/Documents/GitHub/analogical-path-model/sztaki_corpus_2017_2018_0001_clean.tsv', newline='') as f:
+    next(f)
+    reader = csv.reader((row for row in f if row.strip() and not row.startswith('#')), delimiter='\t')
+    
