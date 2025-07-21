@@ -5,6 +5,7 @@ from string import punctuation
 from pprint import pp
 import math
 import csv
+import custom_io
 
 #-----------------#
 # Setup functions #
@@ -31,14 +32,18 @@ def freqtrie_setup(corpus):
     """Make a frequency trie data structure from corpus.
     
     Argument:
-        corpus (list of tuples of strings)
+        corpus (list of iterables, or dict of iterables and their frequencies)
     
     Returns:
-        FreqTrie data structure, representing distribution information about corpus
+        freq_trie: trie data structure of corpus frequencies
     """
     freq_trie = FreqTrie()
-    for sentence in corpus:
-        freq_trie.insert(sentence)
+    if isinstance(corpus, dict):
+        for seq, freq in corpus.items():
+            freq_trie.insert(seq, freq)
+    else:
+        for seq in corpus:
+            freq_trie.insert(seq)
     return freq_trie
 
 def setup():
@@ -346,8 +351,8 @@ def mixed_anls(self, weighted_phraselist):
 
 def bigram_anls(self, bigram):
     s1, s2 = tuple(bigram.split()[:1]), tuple(bigram.split()[1:])
-    s1_anls = min_anls(self, s1)[:30]
-    s2_anls = min_anls(self, s2)[:30]
+    s1_anls = min_anls(self, s1)[:50]
+    s2_anls = min_anls(self, s2)[:50]
     anls = {}
     for s1_anl, s1_score in s1_anls:
         for s2_anl, s2_score in s2_anls:
@@ -355,71 +360,46 @@ def bigram_anls(self, bigram):
                 anls[s1_anl + s2_anl] = anl_mean(s1_score, s2_score)
     return sorted(anls.items(), key=lambda x: x[1], reverse=True)
 
-def pmi(self, left_seq, right_seq):
-    total = self.fw_root.freq
-    joint_prob = self.get_freq(left_seq[:-1] + right_seq[1:]) / total
-    left_prob = self.get_freq(left_seq) / total
-    right_prob = self.get_freq(right_seq) / total
-    try:
-        p = math.log(joint_prob ** 3 / (left_prob * right_prob), 2)
-    except:
-        p = 0
-    return p
+def bigram_to_unigrams(self, bigram):
+    comp_bigrams = bigram_anls(self, bigram)[:200]
+    left, right = tuple(bigram.split()[:1]), tuple(bigram.split()[1:])
+    bw_weighted_contexts = defaultdict(float)
+    fw_weighted_contexts = defaultdict(float)
+    for anl_bigram, weight in comp_bigrams:
+        for bw_context, freq in self.get_fillers(('_',) + anl_bigram):
+            bw_weighted_contexts[bw_context] += freq * weight
+        for fw_context, freq in self.get_fillers(anl_bigram + ('_',)):
+            fw_weighted_contexts[fw_context] += freq * weight
+    bw_target_freq = sum(bw_weighted_contexts.values())
+    bw_anls = defaultdict(float)
+    for bw_context, context_target_freq in bw_weighted_contexts.items():
+        context_freq = self.get_freq(bw_context)
+        for source, context_source_freq in self.get_fillers(bw_context, max_length=2):
+            source_freq = self.get_freq(source)
+            source_to_context_prob = context_source_freq / source_freq
+            context_to_target_prob = context_target_freq / context_freq
+            bw_anls[source[1:]] += path_mean(source_to_context_prob, context_to_target_prob)
+    fw_target_freq = sum(fw_weighted_contexts.values())
+    fw_anls = defaultdict(float)
+    for fw_context, context_target_freq in fw_weighted_contexts.items():
+        context_freq = self.get_freq(fw_context)
+        for source, context_source_freq in self.get_fillers(fw_context, max_length=2):
+            source_freq = self.get_freq(source)
+            source_to_context_prob = context_source_freq / source_freq
+            context_to_target_prob = context_target_freq / context_freq
+            fw_anls[source[:-1]] += path_mean(source_to_context_prob, context_to_target_prob)
+    anls = {}
+    for anl in bw_anls:
+        if anl in fw_anls:
+            anls[anl] = anl_mean(bw_anls[anl], fw_anls[anl])
+    return sorted(anls.items(), key=lambda x: x[1], reverse=True)
 
-def pmi_contexts(self, seq):
-    context_dict = {}
-    for filler, freq in self.get_fillers(seq, max_length=2):
-        context_dict[filler] = pmi(self, seq, filler)
-    return sorted(context_dict.items(), key=lambda x: x[1], reverse=True)
-
-def rem_distr(self, source, target):
-    source_freq = self.get_freq(source)
-    target_freq = self.get_freq(target)
-    kappa = 0
-    shared_contexts = self.get_shared_fillers(
-        ('_',) + source, ('_',) + target, max_length=2
-    )
-    for context, context_source_freq, context_target_freq in shared_contexts:
-        source_to_context_prob = context_source_freq / source_freq
-        target_to_context_prob = context_target_freq / target_freq
-        kappa += min(source_to_context_prob, target_to_context_prob)
-    prob_dict = {}
-    source_contexts = self.get_fillers(('_',) + source, max_length=2)
-    for context, context_source_freq in source_contexts:
-        context_target_freq = self.get_freq(context[:-1] + target)
-        source_to_context_prob = context_source_freq / source_freq
-        target_to_context_prob = context_target_freq / target_freq
-        min_of_probs = min(source_to_context_prob, target_to_context_prob)
-        prob_dict[context] = (source_to_context_prob - min_of_probs) / (1 - kappa)
-    return sorted(prob_dict.items(), key=lambda x: x[1], reverse=True)
-
-def context_shift(self, target, source):
-    source_freq = self.get_freq(source)
-    target_freq = self.get_freq(target)
-    shift_dict = {}
-    source_contexts = self.get_fillers(source + ('_',), max_length=2)
-    for context, context_source_freq in source_contexts:
-        context_target_freq = self.get_freq(target + context[1:])
-        source_to_context_prob = context_source_freq / source_freq + 0.000001
-        target_to_context_prob = context_target_freq / target_freq + 0.000001
-        log_of_probs = math.log(target_to_context_prob / source_to_context_prob, 2)
-        shift_dict[context] = log_of_probs
-    target_contexts = self.get_fillers(target + ('_',), max_length=2)
-    for context, context_target_freq in target_contexts:
-        if context in shift_dict:
-            continue
-        context_source_freq = self.get_freq(source + context[1:])
-        source_to_context_prob = context_source_freq / source_freq + 0.000001
-        target_to_context_prob = context_target_freq / target_freq + 0.000001
-        log_of_probs = math.log(target_to_context_prob / source_to_context_prob, 2)
-        shift_dict[context] = log_of_probs
-    return sorted(shift_dict.items(), key=lambda x: x[1], reverse=True)
 
 # ---------- #
 # Morphology #
 # ---------- #
 
-# Setup
+#> Setup <#
 
 def csv_to_wordfreqdict(filename):
     """Import filename as a dict of words (tuples of characters) with int values.
@@ -429,27 +409,24 @@ def csv_to_wordfreqdict(filename):
         clean_word = lambda s: ('<',) + tuple(s.strip(punctuation).lower()) + ('>',)
         return {clean_word(row['key']): int(row['value']) for row in reader}
 
-def freqtrie_setup_counted(sequence_freq_dict):
-    dt = FreqTrie()
-    most_frequent_items = sorted(
-        sequence_freq_dict.items(),
-        key=lambda x: x[1],
-        reverse=True
-    ) # [:50000]
-    for sequence, count in most_frequent_items:
-        dt.insert(sequence, count)
-    return dt
+#> Analogy-finding <#
 
-def morph_anls(self, target, unseen=lambda x: False):
+def morph_anls(self, target, unseen=lambda x: False, encode=False):
     """Target is signed string, i.e. '<kalap' or 'jaim>'.
     """
+    if encode:
+        target = custom_io.hun_encode(target)
     fw_target = tuple(target) + ('_',)
     fw_anls = defaultdict(float)
     for anl, context, score in morph_anls_dir(self, fw_target, unseen):
+        if encode:
+            anl = custom_io.hun_decode(''.join(anl))
         fw_anls[anl] += score
     bw_target = ('_',) + tuple(target)
     bw_anls = defaultdict(float)
     for anl, context, score in morph_anls_dir(self, bw_target, unseen):
+        if encode:
+            anl = custom_io.hun_decode(''.join(anl))
         bw_anls[anl] += score
     anls = {}
     if '<' in target:
@@ -484,49 +461,72 @@ def morph_anls_dir(self, target, unseen):
             source = source[:-1] if source.index('_') else source[1:]
             yield (source, context, path_mean(source_to_context_prob, context_to_target_prob))
 
-def morph_anl_pairs(dt, c1, c2):
-    anls = {('-', '-'): 0}
-    startswith_c2 = lambda x: x[1:len(c2)] == tuple(c2)[:-1]
-    endswith_c1 = lambda x: x[-len(c1):-1] == tuple(c1)[1:]
-    try:
-        c1_anls = morph_anls(dt, c1, unseen=startswith_c2)[:30]
-        c2_anls = morph_anls(dt, c2, unseen=endswith_c1)[:30]
-    except:
-        return list(anls.items())
-    for c1_data, c2_data in product(c1_anls, c2_anls):
-        c1_anl, c1_score = c1_data
-        c2_anl, c2_score = c2_data
-        if c1_anl == tuple(c1) and c2_anl == tuple(c2):
-            continue
-        if dt.get_freq(c1_anl + c2_anl) > 0:
-            anls[(c1_anl, c2_anl)] = anl_mean(c1_score, c2_score)
-    return sorted(anls.items(), key=lambda x: x[1], reverse=True)
-
-def morph_anl_fixed_c2(dt, c1, c2):
+def morph_anl_fixed_c2(self, c1, c2):
     anls = {}
     startswith_c2 = lambda x: x[1:len(c2)] == tuple(c2)[:-1]
     try:
-        c1_anls = morph_anls(dt, c1, unseen=startswith_c2)
+        c1_anls = morph_anls(self, c1, unseen=startswith_c2)
     except:
         return [('-', 0)]
     for c1_anl, c1_score in c1_anls:
         if c1_anl == tuple(c1):
             continue
-        if dt.get_freq(c1_anl + tuple(c2)) > 0:
-            anls[''.join(c1_anl)[1:]] = c1_score
+        if self.get_freq(c1_anl + tuple(c2)) > 0:
+            anls[custom_io.hun_decode(''.join(c1_anl)[1:])] = c1_score
     return sorted(anls.items(), key=lambda x: x[1], reverse=True)
 
-def morph_anls_iter(dt, word):
+def morph_anls_iter(self, word, encode=False):
+    if encode:
+        word = custom_io.hun_encode(word)
     total_score = 0
     anls_by_split = {}
     anl_words = defaultdict(float)
     constituent_pairs = ((word[:i], word[i:]) for i in range(1, len(word) + 1))
     for c1, c2 in constituent_pairs:
-        anl_data = morph_anl_fixed_c2(dt, '<' + c1, c2 + '>')
+        dec_c1, dec_c2 = custom_io.hun_decode(c1), custom_io.hun_decode(c2)
+        anl_data = morph_anl_fixed_c2(self, '<' + c1, c2 + '>')
         split_score = sum(anl[1] for anl in anl_data)
-        anls_by_split[(c1, c2)] = (split_score, anl_data[:10])
+        anls_by_split[(dec_c1, dec_c2)] = (split_score, anl_data[:10])
         total_score += split_score
         for anl_prefix, score in anl_data:
-            anl_words[anl_prefix + ''.join(c2)] += score
+            anl_words[custom_io.hun_decode(anl_prefix + ''.join(c2))] += score
     anl_words = sorted(anl_words.items(), key=lambda x: x[1], reverse=True)
     pp((anls_by_split, anl_words[:10], total_score))
+
+def relevant_endparts(self, word, suffix):
+    suffix_node = self.get_context_node(('_',) + tuple(suffix))
+    for char in tuple(word):
+        # calculate how much char influences the probability of suffix
+        pass
+
+def rec_morph_anls(self, word, lookup_dict={}):
+    if word == ('<',):
+        return [(('<',), 1)]
+    elif word in lookup_dict:
+        return lookup_dict[word]
+    else:
+        pref_suff_pairs = ((word[:i], word[i:]) for i in range(1, len(word)))
+        anl_words = defaultdict(float)
+        for pref, suff in pref_suff_pairs:
+            # Find outer analogies if prefix is attested
+            anl_prefs = []
+            # Ensure that we haven't seen full word
+            if '>' in suff:
+                unseen_ending = lambda x: x[1:len(suff)] == tuple(suff)[:-1]
+            else:
+                unseen_ending = lambda x: False
+            # Find outer analogies
+            if self.get_freq(pref + ('_',)) > 0:
+                anl_prefs += morph_anls(self, pref, unseen=unseen_ending)
+            # Find recursive (inner) analogies
+            inner_anl_prefs = rec_morph_anls(self, pref, lookup_dict)
+            # Get those analogical prefixes that occurred before suffix
+            for inner_anl_pref, score in inner_anl_prefs:
+                anl_inner_anl_prefs = morph_anls(self, inner_anl_pref)
+                anl_prefs += anl_inner_anl_prefs
+            for anl_pref, score in anl_prefs:
+                if self.get_freq(anl_pref + suff) > 0:
+                    anl_words[anl_pref + suff] += score
+        anl_word_list = sorted(anl_words.items(), key=lambda x: x[1], reverse=True)
+        lookup_dict[word] = anl_word_list
+        return anl_word_list
