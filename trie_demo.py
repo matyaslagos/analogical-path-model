@@ -529,4 +529,5 @@ def rec_morph_anls(self, word, lookup_dict={}):
                     anl_words[anl_pref + suff] += score
         anl_word_list = sorted(anl_words.items(), key=lambda x: x[1], reverse=True)
         lookup_dict[word] = anl_word_list
+        print('hi')
         return anl_word_list
