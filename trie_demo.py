@@ -104,7 +104,7 @@ class FreqTrie:
             self.fw_root._increment_or_make_branch(suffix, count)
             self.bw_root._increment_or_make_branch(reversed(prefix), count)
     
-    def get_node(self, sequence, direction='fw'):
+    def seq_node(self, sequence, direction='fw'):
         """Return the node that represents sequence.
         
         Argument:
@@ -130,17 +130,27 @@ class FreqTrie:
                 return None
         return current_node
     
-    def frequency(self, sequence=''):
+    def freq(self, sequence=''):
         """Return the frequency of sequence.
         """
-        seq_node = self.get_node(sequence)
+        seq_node = self.seq_node(sequence)
         return seq_node.freq if seq_node else 0
+
+    def right_neighbors(self, sequence, max_length=float('inf'),
+        min_length=0, only_completions=False):
+        return self.neighbors(sequence, direction='fw',
+                              max_length, min_length, only_completions)
+
+    def left_neighbors(self, sequence, max_length=float('inf'),
+        min_length=0, only_completions=False):
+        return self.neighbors(sequence, direction='bw',
+                              max_length, min_length, only_completions)
     
     def neighbors(self, sequence, direction='fw',
         max_length=float('inf'), min_length=0, only_completions=False):
         """Return generator of each neighbor of sequence with their joint frequency.
         """
-        seq_node = self.get_node(sequence, direction)
+        seq_node = self.seq_node(sequence, direction)
         return self._neighbors_aux(seq_node, direction, max_length, min_length,
                                    only_completions, path=[])
     
@@ -163,6 +173,16 @@ class FreqTrie:
                                            max_length, min_length,
                                            only_completions, new_path)
     
+    def shared_right_neighbors(self, sequence_1, sequence_2, max_length=float('inf'),
+        only_completions=False):
+        return self.shared_neighbors(sequence_1, sequence_2, direction='fw',
+                                     max_length, only_completions)
+    
+    def shared_left_neighbors(self, sequence_1, sequence_2, max_length=float('inf'),
+        only_completions=False):
+        return self.shared_neighbors(sequence_1, sequence_2, direction='bw',
+                                     max_length, only_completions)
+    
     def shared_neighbors(self, sequence_1, sequence_2, direction='fw',
         max_length=float('inf'), only_completions=False):
         """Return generator of shared fillers of sequence_1 and sequence_2 up to max_length.
@@ -177,8 +197,8 @@ class FreqTrie:
                 - 'this' occurred before 'is good' 23 times, and
                 - 'this' occurred before 'was here' 10 times.
         """
-        seq_node_1 = self.get_node(sequence_1, direction)
-        seq_node_2 = self.get_node(sequence_2, direction)
+        seq_node_1 = self.seq_node(sequence_1, direction)
+        seq_node_2 = self.seq_node(sequence_2, direction)
         return self._shared_neighbors_aux(seq_node_1, seq_node_2, direction,
                                           max_length, only_completions, path=[])
     
@@ -420,15 +440,13 @@ def morph_anls(self, target, unseen=lambda x: False, encode=False):
     """
     if encode:
         target = custom_io.hun_encode(target)
-    fw_target = tuple(target) + ('_',)
     fw_anls = defaultdict(float)
-    for anl, context, score in morph_anls_dir(self, fw_target, unseen):
+    for anl, context, score in morph_anls_dir(self, target, 'fw', unseen):
         if encode:
             anl = custom_io.hun_decode(''.join(anl))
         fw_anls[anl] += score
-    bw_target = ('_',) + tuple(target)
     bw_anls = defaultdict(float)
-    for anl, context, score in morph_anls_dir(self, bw_target, unseen):
+    for anl, context, score in morph_anls_dir(self, target, 'bw', unseen):
         if encode:
             anl = custom_io.hun_decode(''.join(anl))
         bw_anls[anl] += score
@@ -443,31 +461,30 @@ def morph_anls(self, target, unseen=lambda x: False, encode=False):
                 anls[fw_anl] = subst_mean(fw_anls[fw_anl], bw_anls[fw_anl])
     return sorted(anls.items(), key=lambda x: x[1], reverse=True)
 
-def morph_anls_dir(self, target, unseen):
-    """Target is directed, i.e. ('apple', '_') or ('_', 'apple').
+def morph_anls_dir(self, target, direction, unseen):
+    """Target is directed.
     """
-    target_freq = self.get_freq(target)
-    contexts = self.get_fillers(target, max_length=5, min_length=3)
+    target_freq = self.freq(target)
+    contexts = self.neighbors(target, direction, max_length=5, min_length=3)
     for context, context_target_freq in contexts:
         if unseen(context):
             continue
-        context_freq = self.get_freq(context)
+        context_freq = self.freq(context)
         if '<' in target or '>' in target:
-            sources = self.get_fillers(context, only_completions=True)
+            sources = self.neighbors(context, direction, only_completions=True)
         else:
-            sources = self.get_fillers(context, max_length=5)
+            sources = self.neighbors(context, direction, max_length=5)
         for source, context_source_freq in sources:
-            source_freq = self.get_freq(source)
+            source_freq = self.freq(source)
             if source_freq == 0:
                 continue
             source_to_context_prob = context_source_freq / source_freq
             context_to_target_prob = context_target_freq / context_freq
-            source = source[:-1] if source.index('_') else source[1:]
             yield (source, context, path_mean(source_to_context_prob, context_to_target_prob))
 
 def morph_anl_fixed_c2(self, c1, c2):
     anls = {}
-    startswith_c2 = lambda x: x[1:len(c2)] == tuple(c2)[:-1]
+    startswith_c2 = lambda x: x[:len(c2) - 1] == tuple(c2)[:-1]
     try:
         c1_anls = morph_anls(self, c1, unseen=startswith_c2)
     except:
@@ -475,8 +492,8 @@ def morph_anl_fixed_c2(self, c1, c2):
     for c1_anl, c1_score in c1_anls:
         if c1_anl == tuple(c1):
             continue
-        if self.get_freq(c1_anl + tuple(c2)) > 0:
-            anls[custom_io.hun_decode(''.join(c1_anl)[1:])] = c1_score
+        if self.frequency(c1_anl + tuple(c2)) > 0:
+            anls[custom_io.hun_decode(''.join(c1_anl))] = c1_score
     return sorted(anls.items(), key=lambda x: x[1], reverse=True)
 
 def morph_anls_iter(self, word, encode=False):
@@ -520,7 +537,7 @@ def rec_morph_anls(self, word, lookup_dict={}):
             else:
                 unseen_ending = lambda x: False
             # Find outer analogies
-            if self.get_freq(pref + ('_',)) > 0:
+            if self.get_freq(pref) > 0:
                 anl_prefs += morph_anls(self, pref, unseen=unseen_ending)
             # Find recursive (inner) analogies
             inner_anl_prefs = rec_morph_anls(self, pref, lookup_dict)
