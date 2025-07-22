@@ -138,12 +138,12 @@ class FreqTrie:
 
     def right_neighbors(self, sequence, max_length=float('inf'),
         min_length=0, only_completions=False):
-        return self.neighbors(sequence, direction='fw',
+        return self.neighbors(sequence, 'fw',
                               max_length, min_length, only_completions)
 
     def left_neighbors(self, sequence, max_length=float('inf'),
         min_length=0, only_completions=False):
-        return self.neighbors(sequence, direction='bw',
+        return self.neighbors(sequence, 'bw',
                               max_length, min_length, only_completions)
     
     def neighbors(self, sequence, direction='fw',
@@ -175,12 +175,12 @@ class FreqTrie:
     
     def shared_right_neighbors(self, sequence_1, sequence_2, max_length=float('inf'),
         only_completions=False):
-        return self.shared_neighbors(sequence_1, sequence_2, direction='fw',
+        return self.shared_neighbors(sequence_1, sequence_2, 'fw',
                                      max_length, only_completions)
     
     def shared_left_neighbors(self, sequence_1, sequence_2, max_length=float('inf'),
         only_completions=False):
-        return self.shared_neighbors(sequence_1, sequence_2, direction='bw',
+        return self.shared_neighbors(sequence_1, sequence_2, 'bw',
                                      max_length, only_completions)
     
     def shared_neighbors(self, sequence_1, sequence_2, direction='fw',
@@ -451,7 +451,7 @@ def morph_anls(self, target, unseen=lambda x: False, encode=False):
             anl = custom_io.hun_decode(''.join(anl))
         bw_anls[anl] += score
     anls = {}
-    if '<' in target:
+    if True:
         anls = fw_anls
     elif '>' in target:
         anls = bw_anls
@@ -466,20 +466,21 @@ def morph_anls_dir(self, target, direction, unseen):
     """
     target_freq = self.freq(target)
     contexts = self.neighbors(target, direction, max_length=5, min_length=3)
+    other_direction = 'fw' if direction == 'bw' else 'bw'
     for context, context_target_freq in contexts:
         if unseen(context):
             continue
         context_freq = self.freq(context)
         if '<' in target or '>' in target:
-            sources = self.neighbors(context, direction, only_completions=True)
+            sources = self.neighbors(context, other_direction, only_completions=True)
         else:
-            sources = self.neighbors(context, direction, max_length=5)
+            sources = self.neighbors(context, other_direction, only_completions=True)
         for source, context_source_freq in sources:
             source_freq = self.freq(source)
             if source_freq == 0:
                 continue
             source_to_context_prob = context_source_freq / source_freq
-            context_to_target_prob = context_target_freq / context_freq
+            context_to_target_prob = context_target_freq / target_freq
             yield (source, context, path_mean(source_to_context_prob, context_to_target_prob))
 
 def morph_anl_fixed_c2(self, c1, c2):
@@ -488,12 +489,13 @@ def morph_anl_fixed_c2(self, c1, c2):
     try:
         c1_anls = morph_anls(self, c1, unseen=startswith_c2)
     except:
-        return [('-', 0)]
+        return []
     for c1_anl, c1_score in c1_anls:
         if c1_anl == tuple(c1):
             continue
-        if self.frequency(c1_anl + tuple(c2)) > 0:
-            anls[custom_io.hun_decode(''.join(c1_anl))] = c1_score
+        full_word = c1_anl + tuple(c2)
+        if self.freq(full_word) > 0:
+            anls[custom_io.hun_decode(''.join(full_word))] = c1_score
     return sorted(anls.items(), key=lambda x: x[1], reverse=True)
 
 def morph_anls_iter(self, word, encode=False):
@@ -502,7 +504,7 @@ def morph_anls_iter(self, word, encode=False):
     total_score = 0
     anls_by_split = {}
     anl_words = defaultdict(float)
-    constituent_pairs = ((word[:i], word[i:]) for i in range(1, len(word) + 1))
+    constituent_pairs = ((word[:i], word[i:]) for i in range(1, len(word)))
     for c1, c2 in constituent_pairs:
         dec_c1, dec_c2 = custom_io.hun_decode(c1), custom_io.hun_decode(c2)
         anl_data = morph_anl_fixed_c2(self, '<' + c1, c2 + '>')
@@ -510,15 +512,40 @@ def morph_anls_iter(self, word, encode=False):
         anls_by_split[(dec_c1, dec_c2)] = (split_score, anl_data[:10])
         total_score += split_score
         for anl_prefix, score in anl_data:
-            anl_words[custom_io.hun_decode(anl_prefix + ''.join(c2))] += score
+            anl_words[custom_io.hun_decode(anl_prefix)] += score
     anl_words = sorted(anl_words.items(), key=lambda x: x[1], reverse=True)
     return ((anls_by_split, anl_words, total_score))
 
-def relevant_endparts(self, word, suffix):
-    suffix_node = self.get_context_node(('_',) + tuple(suffix))
-    for char in tuple(word):
-        # calculate how much char influences the probability of suffix
-        pass
+#> New iter algorithm <#
+
+def morph_anls_ending(self, pref, suff):
+    pref_freq = self.freq(pref)
+    anl_prefs = self.left_neighbors(suff, only_completions=True)
+    anl_pref_dict = defaultdict(float)
+    for anl_pref, anl_pref_suff_freq in anl_prefs:
+        anl_pref_freq = self.freq(anl_pref)
+        shared_contexts = self.shared_right_neighbors(pref, anl_pref, only_completions=True)
+        for context, context_pref_freq, context_anl_pref_freq in shared_contexts:
+            context_freq = self.freq(context)
+            path_out = context_anl_pref_freq / anl_pref_freq
+            path_in = context_pref_freq / pref_freq
+            anl_pref_dict[anl_pref + tuple(suff)] += path_mean(path_out, path_in)
+    return sorted(anl_pref_dict.items(), key=lambda x: x[1], reverse=True)
+
+def morph_anls_ending_iter(self, word):
+    pref_suff_pairs = ((word[:i], word[i:]) for i in range(1, len(word)))
+    anl_words_dict = defaultdict(float)
+    for pref, suff in pref_suff_pairs:
+        if self.freq(pref) == 0 or self.freq(suff) == 0:
+            continue
+        anls = morph_anls_ending(self, '<' + pref, suff + '>')
+        for anl, score in anls:
+            anl_words_dict[anl] += score
+    return dict_format(anl_words_dict)
+
+def dict_format(dy):
+    sorted_dy = sorted(dy.items(), key=lambda x: x[1], reverse=True)
+    return list(map(lambda x: (custom_io.hun_decode(''.join(x[0])), x[1]), sorted_dy))
 
 def rec_morph_anls(self, word, lookup_dict={}):
     if word == ('<',):
