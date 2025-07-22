@@ -491,7 +491,7 @@ def morph_anls_iter(self, word, encode=False):
         for anl_prefix, score in anl_data:
             anl_words[custom_io.hun_decode(anl_prefix + ''.join(c2))] += score
     anl_words = sorted(anl_words.items(), key=lambda x: x[1], reverse=True)
-    pp((anls_by_split, anl_words[:10], total_score))
+    return ((anls_by_split, anl_words, total_score))
 
 def relevant_endparts(self, word, suffix):
     suffix_node = self.get_context_node(('_',) + tuple(suffix))
@@ -522,12 +522,17 @@ def rec_morph_anls(self, word, lookup_dict={}):
             inner_anl_prefs = rec_morph_anls(self, pref, lookup_dict)
             # Get those analogical prefixes that occurred before suffix
             for inner_anl_pref, score in inner_anl_prefs:
-                anl_inner_anl_prefs = morph_anls(self, inner_anl_pref)
-                anl_prefs += anl_inner_anl_prefs
-            for anl_pref, score in anl_prefs:
+                if inner_anl_pref in lookup_dict:
+                    anl_inner_anl_prefs = lookup_dict[inner_anl_pref]
+                    anl_prefs += anl_inner_anl_prefs
+                elif inner_anl_pref != pref:
+                    anl_inner_anl_prefs = morph_anls(self, inner_anl_pref)[:10]
+                    lookup_dict[inner_anl_pref] = anl_inner_anl_prefs
+                    anl_prefs += anl_inner_anl_prefs
+            anl_prefs = sorted(anl_prefs, key=lambda x: x[1], reverse=True)
+            for anl_pref, score in anl_prefs[:100]:
                 if self.get_freq(anl_pref + suff) > 0:
                     anl_words[anl_pref + suff] += score
         anl_word_list = sorted(anl_words.items(), key=lambda x: x[1], reverse=True)
         lookup_dict[word] = anl_word_list
-        print('hi')
         return anl_word_list

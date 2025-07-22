@@ -21,7 +21,7 @@ def sztaki_tsv_nouns_import():
         is_hun_char = lambda x: x.lower() in ascii_lowercase + 'áéíóúöőüű'
         is_hun_string = lambda x: all(map(is_hun_char, x))
         for row in reader:
-            if row[3].startswith('[/N]') and is_hun_string(row[0]):
+            if len(row) >= 4 and row[3].startswith('[/N]') and is_hun_string(row[0]):
                 freqs['<' + hun_encode(row[0].lower()) + '>'] += 1
     return freqs
 
