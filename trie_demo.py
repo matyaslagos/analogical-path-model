@@ -39,11 +39,11 @@ def freqtrie_setup(corpus):
     """
     freq_trie = FreqTrie()
     if isinstance(corpus, dict):
-        for seq, freq in corpus.items():
-            freq_trie.insert(seq, freq)
+        for sequence, frequency in corpus.items():
+            freq_trie.insert(sequence, frequency)
     else:
-        for seq in corpus:
-            freq_trie.insert(seq)
+        for sequence in corpus:
+            freq_trie.insert(sequence)
     return freq_trie
 
 def setup():
@@ -59,15 +59,15 @@ class FreqNode:
         self.children = {}
         self.freq = 0
     
-    def increment_or_make_branch(self, token_tuple, count=1):
+    def _increment_or_make_branch(self, sequence, count=1):
         """Increment the frequency of token_tuple or make a new branch for it.
         """
         current_node = self
-        for token in token_tuple:
-            current_node = current_node.get_or_make_child(token)
+        for token in sequence:
+            current_node = current_node._get_or_make_child(token)
             current_node.freq += count
     
-    def get_or_make_child(self, token):
+    def _get_or_make_child(self, token):
         """Return the child called token or make a new child called token.
         """
         if token not in self.children:
@@ -79,29 +79,33 @@ class FreqTrie:
         self.fw_root = FreqNode()
         self.bw_root = FreqNode()
     
-    # Record distribution information about a sentence
-    def insert(self, sentence, count=1):
-        """Record all contexts and fillers of sentence into trie.
+    def insert(self, sequence, count=1):
+        """Record distributions of prefixes and suffixes of sequence.
         
-        Argument:
-            sentence (tuple of strings): e.g. ('<', 'this', 'is', 'good', '>')
+        Arguments:
+            sequence (tuple of strings): e.g. ('<', 'this', 'is', 'good', '>')
+            count (int): how many occurrences of sequence should be recorded
         
         Effect:
-            For each prefix--suffix split of sentence, record the occurrences of
-            prefix and suffix. (Prefix is reversed to make shared-filler search more
+            For each prefix--suffix split of sequence, record the occurrences of
+            prefix and suffix. (Prefix is reversed to make shared-neighbor search more
             efficient.)
         """
+        # Add total token frequency mass to root nodes
+        token_freq_mass = len(sequence) * count
+        self.fw_root.freq += token_freq_mass
+        self.bw_root.freq += token_freq_mass
+        # Record each suffix in fw trie and each prefix in bw trie
         prefix_suffix_pairs = (
-            (sentence[:i], sentence[i:])
-            for i in range(len(sentence) + 1)
+            (sequence[:i], sequence[i:])
+            for i in range(len(sequence) + 1)
         )
-        self.fw_root.freq += len(sentence) * count
         for prefix, suffix in prefix_suffix_pairs:
-            self.fw_root.increment_or_make_branch(suffix, count)
-            self.bw_root.increment_or_make_branch(reversed(prefix), count)
+            self.fw_root._increment_or_make_branch(suffix, count)
+            self.bw_root._increment_or_make_branch(reversed(prefix), count)
     
-    def get_context_node(self, context):
-        """Return the node corresponding to a context.
+    def get_node(self, sequence, direction='fw'):
+        """Return the node that represents sequence.
         
         Argument:
             context (tuple of strings): of the form ('this', 'is', '_') or
@@ -112,60 +116,60 @@ class FreqTrie:
             FreqNode corresponding to context.
         """
         # If left context, look up token sequence in forward trie
-        if context[-1] == '_':
+        if direction == 'fw':
             current_node = self.fw_root
-            token_sequence = context[:-1]
         # If right context, look up reversed token sequence in backward trie
-        elif context[0] == '_':
-            current_node = self.bw_root
-            token_sequence = reversed(context[1:])
         else:
-            current_node = self.fw_root
-            token_sequence = context
+            current_node = self.bw_root
+            sequence = reversed(sequence)
         # General lookup
-        for token in token_sequence:
+        for token in sequence:
             try:
                 current_node = current_node.children[token]
             except KeyError:
                 return None
         return current_node
     
-    def get_freq(self, context):
-        """Return the frequency of context.
+    def frequency(self, sequence=''):
+        """Return the frequency of sequence.
         """
-        context_node = self.get_context_node(context)
-        return context_node.freq if context_node else 0
+        seq_node = self.get_node(sequence)
+        return seq_node.freq if seq_node else 0
     
-    def get_fillers(self, context, max_length=float('inf'), min_length=0, only_completions=False):
-        """Return generator of fillers of context up to max_length.
+    def neighbors(self, sequence, direction='fw',
+        max_length=float('inf'), min_length=0, only_completions=False):
+        """Return generator of each neighbor of sequence with their joint frequency.
         """
-        context_node = self.get_context_node(context)
-        # Set direction: "fw" if slot is after context, "bw" if slot is before context
-        direction = 'fw' if context[-1] == '_' else 'bw'
-        return self.get_fillers_aux(context_node, direction, max_length, min_length, only_completions, path=['_'])
+        seq_node = self.get_node(sequence, direction)
+        return self._neighbors_aux(seq_node, direction, max_length, min_length,
+                                   only_completions, path=[])
     
-    def get_fillers_aux(self, context_node, direction, max_length, min_length, only_completions, path):
-        """Yield each filler of context_node up to max_length.
+    def _neighbors_aux(self, seq_node, direction,
+        max_length, min_length, only_completions, path):
+        """Yield each neighbor of sequence with their joint frequency.
         """
         if len(path) >= max_length:
             return
-        for child in context_node.children:
+        for child in seq_node.children:
             new_path = path + [child] if direction == 'fw' else [child] + path
-            child_node = context_node.children[child]
+            child_node = seq_node.children[child]
             freq = child_node.freq
             if not only_completions and len(new_path) >= min_length:
                 yield (tuple(new_path), freq)
             else:
                 if new_path[0] == '<' or new_path[-1] == '>' and len(new_path) >= min_length:
                     yield (tuple(new_path), freq)
-            yield from self.get_fillers_aux(child_node, direction, max_length, min_length, only_completions, new_path)
+            yield from self._neighbors_aux(child_node, direction,
+                                           max_length, min_length,
+                                           only_completions, new_path)
     
-    def get_shared_fillers(self, context_1, context_2, max_length=float('inf'), only_completions=False):
-        """Return generator of shared fillers of context_1 and context_2 up to max_length.
+    def shared_neighbors(self, sequence_1, sequence_2, direction='fw',
+        max_length=float('inf'), only_completions=False):
+        """Return generator of shared fillers of sequence_1 and sequence_2 up to max_length.
         
         Arguments:
-            context_1 (tuple of strings): e.g. ('_', 'is', 'good')
-            context_2 (tuple of strings): e.g. ('_', 'was', 'here')
+            sequence_1 (tuple of strings): e.g. ('_', 'is', 'good')
+            sequence_2 (tuple of strings): e.g. ('_', 'was', 'here')
         
         Returns:
             generator of (filler, freq_1, freq_2) tuples:
@@ -173,24 +177,22 @@ class FreqTrie:
                 - 'this' occurred before 'is good' 23 times, and
                 - 'this' occurred before 'was here' 10 times.
         """
-        context_node_1 = self.get_context_node(context_1)
-        context_node_2 = self.get_context_node(context_2)
-        direction = 'fw' if context_1[-1] == '_' else 'bw'
-        return self.get_shared_fillers_aux(context_node_1, context_node_2, direction,
-                                           max_length, only_completions, path=['_'])
-  
-    # Recursively yield each shared filler of two context nodes
-    def get_shared_fillers_aux(self, context_node_1, context_node_2, direction,
-                               max_length, only_completions, path):
+        seq_node_1 = self.get_node(sequence_1, direction)
+        seq_node_2 = self.get_node(sequence_2, direction)
+        return self._shared_neighbors_aux(seq_node_1, seq_node_2, direction,
+                                          max_length, only_completions, path=[])
+    
+    def _shared_neighbors_aux(self, seq_node_1, seq_node_2, direction,
+        max_length, only_completions, path):
         """Yield each shared filler of context_node_1 and context_node_2 up to max_length.
         """
         if len(path) >= max_length:
             return
-        for child in context_node_1.children:
-            if child in context_node_2.children:
+        for child in seq_node_1.children:
+            if child in seq_node_2.children:
                 new_path = path + [child] if direction == 'fw' else [child] + path
-                child_node_1 = context_node_1.children[child]
-                child_node_2 = context_node_2.children[child]
+                child_node_1 = seq_node_1.children[child]
+                child_node_2 = seq_node_2.children[child]
                 freq_1 = child_node_1.freq
                 freq_2 = child_node_2.freq
                 if not only_completions:
@@ -198,7 +200,9 @@ class FreqTrie:
                 else:
                     if new_path[0] == '<' or new_path[-1] == '>':
                         yield (tuple(new_path), freq_1, freq_2)
-                yield from self.get_shared_fillers_aux(child_node_1, child_node_2, direction, max_length, only_completions, new_path)
+                yield from self._shared_neighbors_aux(child_node_1, child_node_2,
+                                                      direction, max_length,
+                                                      only_completions, new_path)
 
 def path_mean(n, m):
     return min(n, m)
