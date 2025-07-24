@@ -2,6 +2,7 @@ import csv
 import re
 from collections import Counter
 from string import ascii_lowercase
+from pprint import pp
 
 def sztaki_tsv_nouns_import():
     """Import nouns from a SZTAKI cleaned corpus as frequency dict.
@@ -59,3 +60,13 @@ decode_pattern = re.compile(
 
 def hun_decode(word):
     return decode_pattern.sub(lambda x: hun_decodings[x[0]], word)
+
+def dict_to_list(dy, mapping=lambda x: x):
+    mapped_items = ((mapping(key), value) for key, value in dy.items())
+    return sorted(mapped_items, key=lambda x: x[1], reverse=True)
+
+def dict_to_list_hun_decode(dy):
+    return dict_sort(dy, mapping=lambda x: hun_decode(''.join(x)))
+
+def pld(list):
+    pp([(hun_decode(''.join(x[0])), x[1]) for x in list])
