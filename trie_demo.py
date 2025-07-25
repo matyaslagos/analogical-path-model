@@ -582,7 +582,6 @@ def outside_morph_anls(self, pref, suff):
             score = min(anl_pref_prob, pref_prob)
             anl_dict[anl_pref + tuple(suff)] += score
     return custom_io.dict_to_list(anl_dict)
-    
 
 def rec_morph_anls(self, word, lookup_dict={}):
     if word == '<':
@@ -590,6 +589,7 @@ def rec_morph_anls(self, word, lookup_dict={}):
     elif word in lookup_dict:
         return lookup_dict[word]
     else:
+        word = custom_io.hun_encode(word)
         pref_suff_pairs = ((word[:i], word[i:]) for i in range(1, len(word.strip('>'))))
         anl_words = defaultdict(float)
         for pref, suff in pref_suff_pairs:
@@ -597,7 +597,7 @@ def rec_morph_anls(self, word, lookup_dict={}):
             outside_anl_words = outside_morph_anls(self, pref, suff)
             for anl_word, score in outside_anl_words:
                 anl_words[anl_word] += score
-            # Find recursive (inside) analogies
+            # Find recursive (inside-indirect) analogies
             anl_prefs = rec_morph_anls(self, pref, lookup_dict)[:10]
             for anl_pref, anl_pref_score in anl_prefs:
                 inside_anl_words = outside_morph_anls(self, anl_pref, suff)[:10]
