@@ -38,9 +38,17 @@ def freqtrie_setup(corpus):
         freq_trie: trie data structure of corpus frequencies
     """
     freq_trie = FreqTrie()
+    # If corpus is a dict of sequences and their frequencies
     if isinstance(corpus, dict):
-        for sequence, frequency in corpus.items():
-            freq_trie.insert(sequence, frequency)
+        for sequence_data, frequency in corpus.items():
+            # If keys include paradigm cell features
+            if len(sequence_data) == 2:
+                sequence, cell_features = sequence_data
+                freq_trie.insert(sequence, frequency, cell_features)
+            # Elif keys are just sequences
+            else:
+                freq_trie.insert(sequence_data, frequency)
+    # Elif corpus is just an iterator of sequences
     else:
         for sequence in corpus:
             freq_trie.insert(sequence)
@@ -58,6 +66,7 @@ class FreqNode:
     def __init__(self):
         self.children = {}
         self.freq = 0
+        self.cell = set()
     
     def _increment_or_make_branch(self, sequence, count=1):
         """Increment the frequency of token_tuple or make a new branch for it.
@@ -79,7 +88,7 @@ class FreqTrie:
         self.fw_root = FreqNode()
         self.bw_root = FreqNode()
     
-    def insert(self, sequence, count=1):
+    def insert(self, sequence, count=1, cell_features=None):
         """Record distributions of prefixes and suffixes of sequence.
         
         Arguments:
@@ -95,10 +104,13 @@ class FreqTrie:
         token_freq_mass = len(sequence) * count
         self.fw_root.freq += token_freq_mass
         self.bw_root.freq += token_freq_mass
-        # Record each suffix in fw trie and each prefix in bw trie
+        # Record full sequence only in fw_root
+        self.fw_root._increment_or_make_branch(sequence, count)
+        self.sequence_node(sequence).cell = cell_features
+        # Record each proper suffix in fw trie and each proper prefix in bw trie
         prefix_suffix_pairs = (
             (sequence[:i], sequence[i:])
-            for i in range(len(sequence) + 1)
+            for i in range(1, len(sequence))
         )
         for prefix, suffix in prefix_suffix_pairs:
             self.fw_root._increment_or_make_branch(suffix, count)

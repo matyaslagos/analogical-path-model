@@ -4,6 +4,8 @@ from collections import Counter
 from string import ascii_lowercase
 from pprint import pp
 
+#> Importing SZTAKI .tsv corpus <#
+
 def sztaki_tsv_nouns_import():
     """Import nouns from a SZTAKI cleaned corpus as frequency dict.
 
@@ -23,8 +25,12 @@ def sztaki_tsv_nouns_import():
         is_hun_string = lambda x: all(map(is_hun_char, x))
         for row in reader:
             if len(row) >= 4 and row[3].startswith('[/N]') and is_hun_string(row[0]):
-                freqs['<' + hun_encode(row[0].lower()) + '>'] += 1
+                word_form = '<' + hun_encode(row[0].lower()) + '>'
+                cell_features = cell_feature_set(row[3])
+                freqs[(word_form, cell_features)] += 1
     return freqs
+
+#> Encoding Hungarian multiletter sounds <#
 
 hun_encodings = {
     'ccs': '11',
@@ -61,6 +67,8 @@ decode_pattern = re.compile(
 def hun_decode(word):
     return decode_pattern.sub(lambda x: hun_decodings[x[0]], word)
 
+#> Prettyprinting dictionaries <#
+
 def dict_to_list(dy, mapping=lambda x: x):
     mapped_items = ((mapping(key), value) for key, value in dy.items())
     return sorted(mapped_items, key=lambda x: x[1], reverse=True)
@@ -68,5 +76,10 @@ def dict_to_list(dy, mapping=lambda x: x):
 def dict_to_list_hun_decode(dy):
     return dict_sort(dy, mapping=lambda x: hun_decode(''.join(x)))
 
-def pld(list):
+def custom_pp(list):
     pp([(hun_decode(''.join(x[0])), x[1]) for x in list])
+
+#> Parsing paradigm cell features <#
+
+def cell_feature_set(xpostag):
+    return frozenset(re.split(r'\]\[|\.', xpostag[4:].strip('[]')))
