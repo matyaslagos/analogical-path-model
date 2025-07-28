@@ -606,3 +606,9 @@ def rec_morph_anls(self, word, lookup_dict={}):
         anl_word_list = custom_io.dict_to_list(anl_words)
         lookup_dict[word] = anl_word_list
         return anl_word_list
+
+def tulip(set_a, set_b, set_c):
+    center = set_a.intersection(set_b).intersection(set_c)
+    left = set_b.difference(set_a)
+    right = set_c.difference(set_a)
+    return left.union(center).union(right)
