@@ -100,21 +100,21 @@ class FreqTrie:
             prefix and suffix. (Prefix is reversed to make shared-neighbor search more
             efficient.)
         """
-        # Add total token frequency mass to root nodes
+        # Add token frequency mass of sequence to root nodes
         token_freq_mass = len(sequence) * count
         self.fw_root.freq += token_freq_mass
         self.bw_root.freq += token_freq_mass
-        # Record full sequence only in fw_root
-        self.fw_root._increment_or_make_branch(sequence, count)
-        self.sequence_node(sequence).cell = cell_features
-        # Record each proper suffix in fw trie and each proper prefix in bw trie
+        # Record each suffix in fw trie and each prefix in bw trie
         prefix_suffix_pairs = (
             (sequence[:i], sequence[i:])
-            for i in range(1, len(sequence))
+            for i in range(len(sequence) + 1)
         )
         for prefix, suffix in prefix_suffix_pairs:
             self.fw_root._increment_or_make_branch(suffix, count)
             self.bw_root._increment_or_make_branch(reversed(prefix), count)
+        # Record cell features for full sequence
+        if cell_features is not None:
+            self.sequence_node(sequence).cell = cell_features
     
     def sequence_node(self, sequence, direction='fw'):
         """Return the node that represents sequence.
@@ -147,7 +147,11 @@ class FreqTrie:
         """
         seq_node = self.sequence_node(sequence)
         return seq_node.freq if seq_node else 0
-
+    
+    def cell(self, sequence):
+        seq_node = self.sequence_node(sequence)
+        return seq_node.cell if seq_node else frozenset()
+    
     def right_neighbors(self, sequence, max_length=float('inf'),
         min_length=0, only_completions=False):
         return self.neighbors(sequence, 'fw',
@@ -336,59 +340,6 @@ def anl_paths_dir(self, target):
             source = source[:-1] if source.index('_') else source[1:]
             yield (source, context, src_to_cxt_prob, cxt_to_trg_prob)
 
-def mixed_anls(self, weighted_phraselist):
-    """Finds analogies for the mixed distribution of weighted_phraselist.
-    
-    Arguments:
-        weighted_phraselist (list): [(tuple, float)], where tuple is a tuple
-            of strings, e.g. ('our', 'teacher'), and float is its weight, i.e.
-            its substitutability score by some target phrase
-    
-    Returns:
-        ...
-    """
-    # Aggregate probabilities using left contexts
-    left_halves = ((('_',) + phrase, weight) for phrase, weight in weighted_phraselist)
-    left_src_to_cxt = defaultdict(lambda: {})
-    left_cxt_to_trg = defaultdict(float)
-    for target, weight in left_halves:
-        anl_paths = anl_paths_dir(self, target)
-        for source, context, src_to_cxt_prob, cxt_to_trg_prob in anl_paths:
-            left_src_to_cxt[source][context] = src_to_cxt_prob
-            left_cxt_to_trg[context] += cxt_to_trg_prob
-    # Aggregate probabilities using right contexts
-    right_halves = ((phrase + ('_',), weight) for phrase, weight in weighted_phraselist)
-    right_src_to_cxt = defaultdict(lambda: {})
-    right_cxt_to_trg = defaultdict(float)
-    for target, weight in right_halves:
-        anl_paths = anl_paths_dir(self, target)
-        for source, context, src_to_cxt_prob, cxt_to_trg_prob in anl_paths:
-            right_src_to_cxt[source][context] = src_to_cxt_prob
-            right_cxt_to_trg[context] += cxt_to_trg_prob
-    # Compute path means for left contexts
-    left_anls = defaultdict(float)
-    for source in left_src_to_cxt:
-        for context in left_src_to_cxt[source]:
-            left_anls[source] += path_mean(
-                left_src_to_cxt[source][context],
-                left_cxt_to_trg[context]
-            )
-    # Compute path means for right contexts
-    right_anls = defaultdict(float)
-    for source in right_src_to_cxt:
-        for context in right_src_to_cxt[source]:
-            right_anls[source] += path_mean(
-                right_src_to_cxt[source][context],
-                right_cxt_to_trg[context]
-            )
-    # Calculate bilateral substitutability
-    anls = {}
-    for anl in left_anls:
-        if anl in right_anls:
-            anls[anl] = subst_mean(left_anls[anl], right_anls[anl])
-    
-    return sorted(anls.items(), key=lambda x: x[1], reverse=True)
-
 def bigram_anls(self, bigram):
     s1, s2 = tuple(bigram.split()[:1]), tuple(bigram.split()[1:])
     s1_anls = min_anls(self, s1)[:50]
@@ -569,7 +520,7 @@ def dict_format(dy):
     return list(map(lambda x: (custom_io.hun_decode(''.join(x[0])), x[1]), sorted_dy))
 
 # Find anl_prefs for pref by examining their right distributions
-def outside_morph_anls(self, pref, suff):
+def outside_morph_anls(self, pref, suff, find_cells=False):
     anl_dict = defaultdict(float)
     # If suffix is word-ending, we pretend we haven't seen it
     is_unseen = (
@@ -578,10 +529,11 @@ def outside_morph_anls(self, pref, suff):
     )
     pref_freq = self.freq(pref)
     anl_prefs = self.left_neighbors(suff, only_completions=True)
-    t = 0
     for anl_pref, anl_pref_suff_freq in anl_prefs:
         if anl_pref == pref:
             continue
+        anl_pref_cell = self.cell(anl_pref + ('>',))
+        anl_word_cell = self.cell(anl_pref + tuple(suff.strip('>')) + ('>',))
         anl_pref_freq = self.freq(anl_pref)
         shared_contexts = self.shared_right_neighbors(pref, anl_pref, min_length=3)
         for context, context_pref_freq, context_anl_pref_freq in shared_contexts:
@@ -592,7 +544,11 @@ def outside_morph_anls(self, pref, suff):
             anl_pref_prob = context_anl_pref_freq / anl_pref_freq
             pref_prob = context_pref_freq / context_freq
             score = min(anl_pref_prob, pref_prob)
-            anl_dict[anl_pref + tuple(suff)] += score
+            if find_cells:
+                key = (anl_pref, anl_pref_cell, anl_word_cell)
+            else:
+                key = anl_pref
+            anl_dict[key] += score
     return custom_io.dict_to_list(anl_dict)
 
 def rec_morph_anls(self, word, lookup_dict={}):

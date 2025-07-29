@@ -16,9 +16,11 @@ def sztaki_tsv_nouns_import():
         freqs (Counter): dict of nouns and their frequencies
     """
     freqs = Counter()
-    with open('corpora/sztaki_corpus_2017_2018_0001_clean.tsv', newline='') as f:
+    sztaki_corpus_path = 'corpora/sztaki_corpus_2017_2018_0001_clean.tsv'
+    with open(sztaki_corpus_path, newline='') as f:
         reader = csv.reader(
-            (row for row in f if row.strip() and not row.startswith('#')), delimiter='\t'
+            (row for row in f if row.strip() and not row.startswith('#')),
+            delimiter='\t'
         )
         next(reader, None)
         is_hun_char = lambda x: x.lower() in ascii_lowercase + 'áéíóúöőüű'
@@ -79,7 +81,17 @@ def dict_to_list_hun_decode(dy):
 def custom_pp(list):
     pp([(hun_decode(''.join(x[0])), x[1]) for x in list])
 
-#> Parsing paradigm cell features <#
+#> Parsing noun paradigm cell features in tagged SZTAKI corpus <#
 
 def cell_feature_set(xpostag):
-    return frozenset(re.split(r'\]\[|\.', xpostag[4:].strip('[]')))
+    """Convert [/N]-type xpostag into frozenset of cell features.
+
+    Argument:
+        xpostag (string): e.g. [/N][Poss.1Pl][Abl]
+
+    Returns:
+        frozenset (of strings): e.g. {'Poss', '1Pl', 'Abl'}
+    """
+    cell_features = xpostag[4:].strip('[]') # remove starting [/N] and outer brackets
+    delimiters = r'\]\[|\.' # split at "." and "]["
+    return frozenset(filter(None, re.split(delimiters, cell_features)))
