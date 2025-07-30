@@ -520,7 +520,7 @@ def dict_format(dy):
     return list(map(lambda x: (custom_io.hun_decode(''.join(x[0])), x[1]), sorted_dy))
 
 # Find anl_prefs for pref by examining their right distributions
-def outside_morph_anls(self, pref, suff, find_cells=False):
+def outside_morph_anls(self, pref, suff, find_cells=True):
     anl_dict = defaultdict(float)
     # If suffix is word-ending, we pretend we haven't seen it
     is_unseen = (
@@ -534,6 +534,8 @@ def outside_morph_anls(self, pref, suff, find_cells=False):
             continue
         anl_pref_cell = self.cell(anl_pref + ('>',))
         anl_word_cell = self.cell(anl_pref + tuple(suff.strip('>')) + ('>',))
+        if not anl_word_cell:
+            continue
         anl_pref_freq = self.freq(anl_pref)
         shared_contexts = self.shared_right_neighbors(pref, anl_pref, min_length=3)
         for context, context_pref_freq, context_anl_pref_freq in shared_contexts:
@@ -542,7 +544,7 @@ def outside_morph_anls(self, pref, suff, find_cells=False):
             context_freq = self.freq(context)
             # Calculate probs of pref--context and anl_pref--context paths
             anl_pref_prob = context_anl_pref_freq / anl_pref_freq
-            pref_prob = context_pref_freq / context_freq
+            pref_prob = context_pref_freq / pref_freq
             score = min(anl_pref_prob, pref_prob)
             if find_cells:
                 key = (anl_pref, anl_pref_cell, anl_word_cell)
@@ -553,27 +555,39 @@ def outside_morph_anls(self, pref, suff, find_cells=False):
 
 def rec_morph_anls(self, word, lookup_dict={}):
     if word == '<':
-        return [(('<',), 1)]
+        return (frozenset(), [(('<',), 1)])
     elif word in lookup_dict:
         return lookup_dict[word]
     else:
         word = custom_io.hun_encode(word)
         pref_suff_pairs = ((word[:i], word[i:]) for i in range(1, len(word.strip('>'))))
         anl_words = defaultdict(float)
+        word_cells = defaultdict(float)
         for pref, suff in pref_suff_pairs:
+            # Recursive call
+            pref_cell, anl_prefs = rec_morph_anls(self, pref, lookup_dict)
+            anl_prefs = anl_prefs.copy()[:20]
             # Find outside analogies
-            outside_anl_words = outside_morph_anls(self, pref, suff)
-            for anl_word, score in outside_anl_words:
+            outside_anl_bases = outside_morph_anls(self, pref, suff)[:10]
+            for anl_base, score in outside_anl_bases:
+                anl_pref, anl_pref_cell, anl_word_cell = anl_base
+                anl_word = anl_pref + tuple(suff)
                 anl_words[anl_word] += score
+                word_cell = tulip(anl_pref_cell, anl_word_cell, pref_cell)
+                word_cells[word_cell] += score
             # Find recursive (inside-indirect) analogies
-            anl_prefs = rec_morph_anls(self, pref, lookup_dict)[:10]
             for anl_pref, anl_pref_score in anl_prefs:
-                inside_anl_words = outside_morph_anls(self, anl_pref, suff)[:10]
-                for anl_word, score in inside_anl_words:
+                inside_anl_bases = outside_morph_anls(self, anl_pref, suff)[:10]
+                for anl_base, score in inside_anl_bases:
+                    anl_pref, anl_pref_cell, anl_word_cell = anl_base
+                    anl_word = anl_pref + tuple(suff)
                     anl_words[anl_word] += math.sqrt(score * anl_pref_score)
+                    word_cell = tulip(anl_pref_cell, anl_word_cell, pref_cell)
+                    word_cells[word_cell] += math.sqrt(score * anl_pref_score)
+        best_word_cell = sorted(word_cells.keys(), key=word_cells.get, reverse=True)[0]
         anl_word_list = custom_io.dict_to_list(anl_words)
-        lookup_dict[word] = anl_word_list
-        return anl_word_list
+        lookup_dict[word] = (best_word_cell, anl_word_list)
+        return (best_word_cell, anl_word_list)
 
 def tulip(set_a, set_b, set_c):
     center = set_a.intersection(set_b).intersection(set_c)
