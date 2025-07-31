@@ -66,7 +66,7 @@ class FreqNode:
     def __init__(self):
         self.children = {}
         self.freq = 0
-        self.cell = set()
+        self.cell = None
     
     def _increment_or_make_branch(self, sequence, count=1):
         """Increment the frequency of token_tuple or make a new branch for it.
@@ -568,6 +568,7 @@ def rec_morph_anls(self, word, lookup_dict={}):
             pref_cell, anl_prefs = rec_morph_anls(self, pref, lookup_dict)
             anl_prefs = anl_prefs.copy()[:20]
             # Find outside analogies
+            # TODO: integrate into recursive analogy finding below
             outside_anl_bases = outside_morph_anls(self, pref, suff)[:10]
             for anl_base, score in outside_anl_bases:
                 anl_pref, anl_pref_cell, anl_word_cell = anl_base
