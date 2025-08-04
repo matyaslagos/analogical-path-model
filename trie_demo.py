@@ -520,7 +520,7 @@ def dict_format(dy):
     return list(map(lambda x: (custom_io.hun_decode(''.join(x[0])), x[1]), sorted_dy))
 
 # Find anl_prefs for pref by examining their right distributions
-def outside_morph_anls(self, pref, suff, find_cells=True):
+def outside_morph_anls(self, pref, suff):
     anl_dict = defaultdict(float)
     # If suffix is word-ending, we pretend we haven't seen it
     is_unseen = (
@@ -534,7 +534,7 @@ def outside_morph_anls(self, pref, suff, find_cells=True):
             continue
         anl_pref_cell = self.cell(anl_pref + ('>',))
         anl_word_cell = self.cell(anl_pref + tuple(suff.strip('>')) + ('>',))
-        if not anl_word_cell:
+        if anl_pref_cell and not anl_word_cell:
             continue
         anl_pref_freq = self.freq(anl_pref)
         shared_contexts = self.shared_right_neighbors(pref, anl_pref, min_length=3)
@@ -546,14 +546,13 @@ def outside_morph_anls(self, pref, suff, find_cells=True):
             anl_pref_prob = context_anl_pref_freq / anl_pref_freq
             pref_prob = context_pref_freq / pref_freq
             score = min(anl_pref_prob, pref_prob)
-            if find_cells:
-                key = (anl_pref, anl_pref_cell, anl_word_cell)
-            else:
-                key = anl_pref
+            key = (anl_pref, anl_pref_cell, anl_word_cell)
             anl_dict[key] += score
     return custom_io.dict_to_list(anl_dict)
 
-def rec_morph_anls(self, word, lookup_dict={}):
+def rec_morph_anls(self, word, lookup_dict=None):
+    if lookup_dict is None:
+        lookup_dict = {}
     if word == '<':
         return (frozenset(), [(('<',), 1)])
     elif word in lookup_dict:
@@ -566,7 +565,7 @@ def rec_morph_anls(self, word, lookup_dict={}):
         for pref, suff in pref_suff_pairs:
             # Recursive call
             pref_cell, anl_prefs = rec_morph_anls(self, pref, lookup_dict)
-            anl_prefs = anl_prefs.copy()[:20]
+            anl_prefs = anl_prefs.copy()[:20]# + [(pref, 1)]
             # Find outside analogies
             # TODO: integrate into recursive analogy finding below
             outside_anl_bases = outside_morph_anls(self, pref, suff)[:10]
