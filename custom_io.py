@@ -22,14 +22,14 @@ def sztaki_tsv_nouns_import():
             (row for row in f if row.strip() and not row.startswith('#')),
             delimiter='\t'
         )
-        next(reader, None)
+        next(reader, None) # skip first line
         is_hun_char = lambda x: x.lower() in ascii_lowercase + 'áéíóúöőüű'
         is_hun_string = lambda x: all(map(is_hun_char, x))
         for row in reader:
             if len(row) >= 4 and row[3].startswith('[/N]') and is_hun_string(row[0]):
                 word_form = '<' + hun_encode(row[0].lower()) + '>'
-                cell_features = cell_feature_set(row[3])
-                freqs[(word_form, cell_features)] += 1
+                tags = xpostag_set(row[3])
+                freqs[(word_form, tags)] += 1
     return freqs
 
 #> Encoding Hungarian multiletter sounds <#
@@ -53,6 +53,7 @@ hun_encodings = {
     'zs': '7',
     'ly': 'j'
 }
+
 encode_pattern = re.compile(
     '|'.join(re.escape(k) for k in sorted(hun_encodings, key=len, reverse=True))
 )
@@ -81,17 +82,26 @@ def dict_to_list_hun_decode(dy):
 def custom_pp(list):
     pp([(hun_decode(''.join(x[0])), x[1]) for x in list])
 
-#> Parsing noun paradigm cell features in tagged SZTAKI corpus <#
+#> Parsing paradigm cell tags in tagged SZTAKI corpus <#
 
-def cell_feature_set(xpostag):
-    """Convert [/N]-type xpostag into frozenset of cell features.
+def xpostag_set(xpostag, include_pos=False):
+    """Convert xpostag into frozenset of cell tags.
 
-    Argument:
-        xpostag (string): e.g. [/N][Poss.1Pl][Abl]
+    Arguments:
+        - xpostag (string): e.g. '[/N][Poss.1Pl][Abl]'
+        - include_pos (bool): whether to include first tag (general pos)
 
     Returns:
-        frozenset (of strings): e.g. {'Poss', '1Pl', 'Abl'}
+        - frozenset (of strings): e.g. {'Poss', '1Pl', 'Abl'}
     """
-    cell_features = xpostag[4:].strip('[]') # remove starting [/N] and outer brackets
-    delimiters = r'\]\[|\.' # split at "." and "]["
-    return frozenset(filter(None, re.split(delimiters, cell_features)))
+    return frozenset(re.findall(r'[^.\[\]]+', xpostag)[not include_pos:])
+
+#> Old csv importer <#
+
+def csv_to_wordfreqdict(filename):
+    """Import filename as a dict of words (tuples of characters) with int values.
+    """
+    with open(filename, newline='', encoding='utf-8-sig') as file:
+        reader = csv.DictReader(file)
+        clean_word = lambda s: ('<',) + tuple(s.strip(punctuation).lower()) + ('>',)
+        return {clean_word(row['key']): int(row['value']) for row in reader}
