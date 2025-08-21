@@ -403,7 +403,6 @@ def rec_morph_anls(self, word, lookup_dict=None):
                     word_cell = tulip(anl_pref_cell, anl_word_cell, pref_cell)
                     word_cells[word_cell] += math.sqrt(score * anl_pref_score)
         best_word_cell = sorted(word_cells.keys(), key=word_cells.get, reverse=True)[0]
-        print(word, best_word_cell)
         anl_word_list = custom_io.dict_to_list(anl_words)
         lookup_dict[word] = (best_word_cell, anl_word_list)
         return (best_word_cell, anl_word_list)
