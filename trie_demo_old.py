@@ -41,18 +41,22 @@ def freqtrie_setup(corpus):
     # If corpus is a dict of sequences and their frequencies
     if isinstance(corpus, dict):
         for sequence_data, frequency in corpus.items():
-            # If keys include paradigm cell tags
+            # If keys include paradigm cell features
             if len(sequence_data) == 2:
-                sequence, tags = sequence_data
-                freq_trie._insert(sequence, frequency, tags)
+                sequence, cell_features = sequence_data
+                freq_trie.insert(sequence, frequency, cell_features)
             # Elif keys are just sequences
             else:
-                freq_trie._insert(sequence_data, frequency)
+                freq_trie.insert(sequence_data, frequency)
     # Elif corpus is just an iterator of sequences
     else:
         for sequence in corpus:
-            freq_trie._insert(sequence)
+            freq_trie.insert(sequence)
     return freq_trie
+
+def setup():
+    corpus = txt_to_list('norvig_corpus.txt')
+    return freq_trie_setup(corpus)
 
 #-----------------------------------------#
 # FreqNode and FreqTrie class definitions #
@@ -62,15 +66,15 @@ class FreqNode:
     def __init__(self):
         self.children = {}
         self.freq = 0
-        self.tags = None
+        self.cell = None
     
-    def _increment_or_make_branch(self, sequence, freq=1):
+    def _increment_or_make_branch(self, sequence, count=1):
         """Increment the frequency of token_tuple or make a new branch for it.
         """
         current_node = self
         for token in sequence:
             current_node = current_node._get_or_make_child(token)
-            current_node.freq += freq
+            current_node.freq += count
     
     def _get_or_make_child(self, token):
         """Return the child called token or make a new child called token.
@@ -84,33 +88,33 @@ class FreqTrie:
         self.fw_root = FreqNode()
         self.bw_root = FreqNode()
     
-    def _insert(self, sequence, freq=1, tags=None):
+    def insert(self, sequence, count=1, cell_features=None):
         """Record distributions of prefixes and suffixes of sequence.
         
         Arguments:
-            - sequence (iterable of strings): e.g. ['<', 'this', 'is', 'good', '>']
-            - freq (int): how many occurrences of sequence should be recorded
+            sequence (tuple of strings): e.g. ('<', 'this', 'is', 'good', '>')
+            count (int): how many occurrences of sequence should be recorded
         
         Effect:
-            - For each prefix--suffix split of sequence, record the occurrences of
-              prefix and suffix. (Prefix is reversed to make shared-neighbor search more
-              efficient.)
+            For each prefix--suffix split of sequence, record the occurrences of
+            prefix and suffix. (Prefix is reversed to make shared-neighbor search more
+            efficient.)
         """
-        # Add token frequency mass of sequence to root nodes (to record corpus size)
-        token_freq_mass = len(sequence) * freq
+        # Add token frequency mass of sequence to root nodes
+        token_freq_mass = len(sequence) * count
         self.fw_root.freq += token_freq_mass
         self.bw_root.freq += token_freq_mass
-        # Record each suffix in fw trie and each reversed prefix in bw trie
+        # Record each suffix in fw trie and each prefix in bw trie
         prefix_suffix_pairs = (
             (sequence[:i], sequence[i:])
             for i in range(len(sequence) + 1)
         )
         for prefix, suffix in prefix_suffix_pairs:
-            self.fw_root._increment_or_make_branch(suffix, freq)
-            self.bw_root._increment_or_make_branch(reversed(prefix), freq)
+            self.fw_root._increment_or_make_branch(suffix, count)
+            self.bw_root._increment_or_make_branch(reversed(prefix), count)
         # Record cell features for full sequence
-        if tags is not None:
-            self.sequence_node(sequence).tags = tags
+        if cell_features is not None:
+            self.sequence_node(sequence).cell = cell_features
     
     def sequence_node(self, sequence, direction='fw'):
         """Return the node that represents sequence.
@@ -144,22 +148,22 @@ class FreqTrie:
         seq_node = self.sequence_node(sequence)
         return seq_node.freq if seq_node else 0
     
-    def tags(self, sequence):
+    def cell(self, sequence):
         seq_node = self.sequence_node(sequence)
-        return seq_node.tags if seq_node else frozenset()
+        return seq_node.cell if seq_node else frozenset()
     
     def right_neighbors(self, sequence, max_length=float('inf'),
-                        min_length=0, only_completions=False):
-        return self._neighbors(sequence, 'fw',
-                               max_length, min_length, only_completions)
+        min_length=0, only_completions=False):
+        return self.neighbors(sequence, 'fw',
+                              max_length, min_length, only_completions)
 
     def left_neighbors(self, sequence, max_length=float('inf'),
-                       min_length=0, only_completions=False):
-        return self._neighbors(sequence, 'bw',
-                               max_length, min_length, only_completions)
+        min_length=0, only_completions=False):
+        return self.neighbors(sequence, 'bw',
+                              max_length, min_length, only_completions)
     
-    def _neighbors(self, sequence, direction='fw',
-                   max_length=float('inf'), min_length=0, only_completions=False):
+    def neighbors(self, sequence, direction='fw',
+        max_length=float('inf'), min_length=0, only_completions=False):
         """Return generator of each neighbor of sequence with their joint frequency.
         """
         seq_node = self.sequence_node(sequence, direction)
@@ -169,7 +173,7 @@ class FreqTrie:
                                    only_completions, path=[])
     
     def _neighbors_aux(self, seq_node, direction,
-                       max_length, min_length, only_completions, path):
+        max_length, min_length, only_completions, path):
         """Yield each neighbor of sequence with their joint frequency.
         """
         if len(path) >= max_length:
@@ -178,25 +182,27 @@ class FreqTrie:
             new_path = path + [child] if direction == 'fw' else [child] + path
             child_node = seq_node.children[child]
             freq = child_node.freq
-            if len(new_path) >= min_length:
-                if (not only_completions) or (child in '<>'):
+            if not only_completions and len(new_path) >= min_length:
+                yield (tuple(new_path), freq)
+            else:
+                if (new_path[0] == '<' or new_path[-1] == '>') and len(new_path) >= min_length:
                     yield (tuple(new_path), freq)
             yield from self._neighbors_aux(child_node, direction,
                                            max_length, min_length,
                                            only_completions, new_path)
     
     def shared_right_neighbors(self, sequence_1, sequence_2, max_length=float('inf'),
-                               min_length=0, only_completions=False):
-        return self._shared_neighbors(sequence_1, sequence_2, 'fw',
-                                      max_length, min_length, only_completions)
+        min_length=0, only_completions=False):
+        return self.shared_neighbors(sequence_1, sequence_2, 'fw',
+                                     max_length, min_length, only_completions)
     
     def shared_left_neighbors(self, sequence_1, sequence_2, max_length=float('inf'),
-                              min_length=0, only_completions=False):
-        return self._shared_neighbors(sequence_1, sequence_2, 'bw',
-                                      max_length, min_length, only_completions)
+        min_length=0, only_completions=False):
+        return self.shared_neighbors(sequence_1, sequence_2, 'bw',
+                                     max_length, min_length, only_completions)
     
-    def _shared_neighbors(self, sequence_1, sequence_2, direction='fw',
-                          max_length=float('inf'), min_length=0, only_completions=False):
+    def shared_neighbors(self, sequence_1, sequence_2, direction='fw',
+        max_length=float('inf'), min_length=0, only_completions=False):
         """Return generator of shared fillers of sequence_1 and sequence_2 up to max_length.
         
         Arguments:
@@ -217,7 +223,7 @@ class FreqTrie:
                                           max_length, min_length, only_completions, path=[])
     
     def _shared_neighbors_aux(self, seq_node_1, seq_node_2, direction,
-                              max_length, min_length, only_completions, path):
+        max_length, min_length, only_completions, path):
         """Yield each shared filler of context_node_1 and context_node_2 up to max_length.
         """
         if len(path) >= max_length:
@@ -229,63 +235,120 @@ class FreqTrie:
                 child_node_2 = seq_node_2.children[child]
                 freq_1 = child_node_1.freq
                 freq_2 = child_node_2.freq
-                if len(new_path) >= min_length:
-                    if (not only_completions) or (child in '<>'):
+                if (not only_completions) and len(new_path) >= min_length:
+                    yield (tuple(new_path), freq_1, freq_2)
+                else:
+                    if (new_path[0] == '<' or new_path[-1] == '>') and len(new_path) >= min_length:
                         yield (tuple(new_path), freq_1, freq_2)
                 yield from self._shared_neighbors_aux(child_node_1, child_node_2,
                                                       direction, max_length, min_length,
                                                       only_completions, new_path)
 
-    def right_analogical_bases(self, sequence, max_length=float('inf')):
-        """Return dict of analogical bases of sequence based on right contexts.
-        """
-        return self._analogical_bases(sequence, 'fw', max_length)
+def path_mean(n, m):
+    return min(n, m)
 
-    def left_analogical_bases(self, sequence, max_length=float('inf')):
-        """Return dict of analogical bases of sequence based on left contexts.
-        """
-        return self._analogical_bases(sequence, 'bw', max_length)
-    
-    def _analogical_bases(self, sequence, direction, max_length=float('inf')):
-        """Return dict of analogical bases of target sequence given direction.
+def subst_mean(n, m):
+    return min(n, m)
 
-        Sequence s1 is an analogical base of target sequence s2 to degree r if
-        we can substitute s1 by s2 in arbitrary contexts with certainty r.
-        """
-        target_freq = self.freq(sequence)
-        base_dict = defaultdict(float)
-        contexts = self.neighbors(sequence, direction)
-        for context, context_target_freq in contexts:
-            context_freq = self.freq(context)
-            # Probability of going from context to target
-            context_target_prob = context_target_freq / context_freq
-            other_direction = 'bw' if direction == 'fw' else 'fw'
-            bases = self.neighbors(context, other_direction, max_length)
-            for base, context_base_freq in bases:
-                base_freq = self.freq(base)
-                # Probability of going from source to context
-                context_base_prob = context_base_freq / base_freq
-                base_dict[base] += min(context_target_prob, context_base_prob)
-        return base_dict
+def anl_mean(n, m):
+    return min(n, m)
 
-def bilateral_analogical_bases(self, sequence):
-    left_base_dict = self.left_analogical_bases(sequence, len(sequence))
-    right_base_dict = self.right_analogical_bases(sequence, len(sequence))
-    bilateral_bases = left_base_dict.keys() & right_base_dict.keys()
-    bilateral_base_dict = {}
-    for base in bilateral_bases:
-        bilateral_base_dict[base] = min(left_base_dict[base], right_base_dict[base])
-    return sorted(bilateral_base_dict.items(), key=lambda x: x[1], reverse=True)
+def anl_substs(self, source_context_string):
+    right_source = rc(self, source_context_string)
+    right_source_freq = self.get_freq(right_source)
+    left_fillers = self.get_fillers(right_source)
+    right_subst_dict = defaultdict(float)
+    for left_filler, fw_step_freq in left_fillers:
+        left_filler_freq = self.get_freq(left_filler)
+        right_substs = self.get_fillers(left_filler, len(right_source))
+        for right_subst, bw_step_freq in right_substs:
+            right_subst_freq = self.get_freq(right_subst)
+            fw_prob = fw_step_freq / (left_filler_freq)
+            bw_prob = bw_step_freq / (right_subst_freq)
+            right_subst_dict[right_subst] += path_mean(fw_prob, bw_prob)
+    left_source = lc(self, source_context_string)
+    left_source_freq = self.get_freq(left_source)
+    left_subst_dict = defaultdict(float)
+    for right_subst, right_subst_score in right_subst_dict.items():
+        left_subst = right_subst[1:] + ('_',)
+        left_subst_freq = self.get_freq(left_subst)
+        right_fillers = self.get_shared_fillers(left_subst, left_source)
+        for right_filler, bw_step_freq, fw_step_freq in right_fillers:
+            right_filler_freq = self.get_freq(right_filler)
+            fw_prob = fw_step_freq / (right_filler_freq)
+            bw_prob = bw_step_freq / (left_subst_freq)
+            left_subst_dict[left_subst] += path_mean(fw_prob, bw_prob)
+    subst_dict = {}
+    for left_subst, left_subst_score in left_subst_dict.items():
+        subst_dict[left_subst[:-1]] = subst_mean(left_subst_score, right_subst_dict[('_',) + left_subst[:-1]])
+    return sorted(subst_dict.items(), key=lambda x: x[1], reverse=True)
+
+def analogies(self, word):
+    word_freq = self.get_freq(lc(self, word))
+    best_anls = anl_substs(self, word)[1:11]
+    anl_list = [
+        (anl[0], self.get_freq(anl[0] + ('_',)))
+        for anl in best_anls
+    ]
+    max_len = max(len(anl[0]) for anl, freq in anl_list)
+    print(f'Ten best analogies for "{word}" ({word_freq}):')
+    for anl, freq in anl_list:
+        space = ' ' * (max_len - len(anl[0]) + 1)
+        print(f'- "{anl[0]}"{space}({freq})')
+
+def min_anls(self, target):
+    """Target is undirected, i.e. ('apple',)."""
+    fw_target, bw_target = target + ('_',), ('_',) + target
+    fw_anls = defaultdict(float)
+    for anl, context, score in min_anls_dir(self, fw_target):
+        fw_anls[anl] += score
+    bw_anls = defaultdict(float)
+    for anl, context, score in min_anls_dir(self, bw_target):
+        bw_anls[anl] += score
+    anls = {}
+    for anl in fw_anls:
+        if anl in bw_anls:
+            anls[anl] = subst_mean(fw_anls[anl], bw_anls[anl])
+    return sorted(anls.items(), key=lambda x: x[1], reverse=True)
+
+def min_anls_dir(self, target):
+    """Target is directed, i.e. ('apple', '_') or ('_', 'apple')."""
+    target_freq = self.get_freq(target)
+    contexts = self.get_fillers(target)
+    for context, context_target_freq in contexts:
+        context_freq = self.get_freq(context)
+        sources = self.get_fillers(context, len(target))
+        for source, context_source_freq in sources:
+            source_freq = self.get_freq(source)
+            source_to_context_prob = context_source_freq / source_freq
+            context_to_target_prob = context_target_freq / context_freq
+            source = source[:-1] if source.index('_') else source[1:]
+            yield (source, context, path_mean(source_to_context_prob, context_to_target_prob))
+
+def anl_paths_dir(self, target):
+    """Target is directed, i.e. ('apple', '_') or ('_', 'apple').
+    """
+    target_freq = self.get_freq(target)
+    contexts = self.get_fillers(target)
+    for context, context_target_freq in contexts:
+        context_freq = self.get_freq(context)
+        sources = self.get_fillers(context, len(target))
+        for source, context_source_freq in sources:
+            source_freq = self.get_freq(source)
+            src_to_cxt_prob = context_source_freq / source_freq
+            cxt_to_trg_prob = context_target_freq / context_freq
+            source = source[:-1] if source.index('_') else source[1:]
+            yield (source, context, src_to_cxt_prob, cxt_to_trg_prob)
 
 def bigram_anls(self, bigram):
     s1, s2 = tuple(bigram.split()[:1]), tuple(bigram.split()[1:])
-    s1_bases = bilateral_analogical_bases(self, s1)[:50]
-    s2_bases = bilateral_analogical_bases(self, s2)[:50]
+    s1_anls = min_anls(self, s1)[:50]
+    s2_anls = min_anls(self, s2)[:50]
     anls = {}
     for s1_anl, s1_score in s1_anls:
         for s2_anl, s2_score in s2_anls:
-            if self.freq(s1_anl + s2_anl):
-                anls[s1_anl + s2_anl] = min(s1_score, s2_score)
+            if self.get_freq(s1_anl + s2_anl + ('_',)) > 0:
+                anls[s1_anl + s2_anl] = anl_mean(s1_score, s2_score)
     return sorted(anls.items(), key=lambda x: x[1], reverse=True)
 
 def bigram_to_unigrams(self, bigram):
@@ -337,6 +400,125 @@ def csv_to_wordfreqdict(filename):
         clean_word = lambda s: ('<',) + tuple(s.strip(punctuation).lower()) + ('>',)
         return {clean_word(row['key']): int(row['value']) for row in reader}
 
+#> Analogy-finding <#
+
+def morph_anls(self, target, unseen=lambda x: False, encode=False):
+    """Target is signed string, i.e. '<kalap' or 'jaim>'.
+    """
+    if encode:
+        target = custom_io.hun_encode(target)
+    fw_anls = defaultdict(float)
+    for anl, context, score in morph_anls_dir(self, target, 'fw', unseen):
+        if encode:
+            anl = custom_io.hun_decode(''.join(anl))
+        fw_anls[anl] += score
+    bw_anls = defaultdict(float)
+    for anl, context, score in morph_anls_dir(self, target, 'bw', unseen):
+        if encode:
+            anl = custom_io.hun_decode(''.join(anl))
+        bw_anls[anl] += score
+    anls = {}
+    if '<' in target:
+        anls = fw_anls
+    elif '>' in target:
+        anls = bw_anls
+    else:
+        for fw_anl in fw_anls:
+            if fw_anl in bw_anls:
+                anls[fw_anl] = subst_mean(fw_anls[fw_anl], bw_anls[fw_anl])
+    return sorted(anls.items(), key=lambda x: x[1], reverse=True)
+
+def morph_anls_dir(self, target, direction, unseen):
+    """Target is directed.
+    """
+    target_freq = self.freq(target)
+    contexts = self.neighbors(target, direction, max_length=5, min_length=3)
+    other_direction = 'fw' if direction == 'bw' else 'bw'
+    for context, context_target_freq in contexts:
+        if unseen(context):
+            continue
+        context_freq = self.freq(context)
+        if '<' in target or '>' in target:
+            sources = self.neighbors(context, other_direction, only_completions=True)
+        else:
+            sources = self.neighbors(context, other_direction, only_completions=True)
+        for source, context_source_freq in sources:
+            source_freq = self.freq(source)
+            if source_freq == 0:
+                continue
+            source_to_context_prob = context_source_freq / source_freq
+            context_to_target_prob = context_target_freq / target_freq
+            yield (source, context, path_mean(source_to_context_prob, context_to_target_prob))
+
+def morph_anl_fixed_c2(self, c1, c2):
+    anls = {}
+    startswith_c2 = lambda x: x[:len(c2) - 1] == tuple(c2)[:-1]
+    try:
+        c1_anls = morph_anls(self, c1, unseen=startswith_c2)
+    except:
+        return []
+    for c1_anl, c1_score in c1_anls:
+        if c1_anl == tuple(c1):
+            continue
+        full_word = c1_anl + tuple(c2)
+        if self.freq(full_word) > 0:
+            anls[custom_io.hun_decode(''.join(full_word))] = c1_score
+    return sorted(anls.items(), key=lambda x: x[1], reverse=True)
+
+def morph_anls_iter(self, word, encode=False):
+    if encode:
+        word = custom_io.hun_encode(word)
+    total_score = 0
+    anls_by_split = {}
+    anl_words = defaultdict(float)
+    constituent_pairs = ((word[:i], word[i:]) for i in range(1, len(word)))
+    for c1, c2 in constituent_pairs:
+        dec_c1, dec_c2 = custom_io.hun_decode(c1), custom_io.hun_decode(c2)
+        anl_data = morph_anl_fixed_c2(self, '<' + c1, c2 + '>')
+        split_score = sum(anl[1] for anl in anl_data)
+        anls_by_split[(dec_c1, dec_c2)] = (split_score, anl_data[:10])
+        total_score += split_score
+        for anl_prefix, score in anl_data:
+            anl_words[custom_io.hun_decode(anl_prefix)] += score
+    anl_words = sorted(anl_words.items(), key=lambda x: x[1], reverse=True)
+    return (anls_by_split, anl_words, total_score)
+
+#> New iter algorithm <#
+
+def morph_anls_ending(self, prefix, suffix):
+    unseen = lambda x: x[:len(suffix) - 1] == tuple(suffix)[:-1]
+    prefix_freq = self.freq(prefix)
+    anl_prefixes = self.left_neighbors(suffix, only_completions=True)
+    anl_prefix_dict = defaultdict(float)
+    for anl_prefix, anl_prefix_suffix_freq in anl_prefixes:
+        anl_prefix_freq = self.freq(anl_prefix)
+        shared_contexts = self.shared_right_neighbors(prefix, anl_prefix,
+                                                      min_length=2, only_completions=True)
+        for context, context_prefix_freq, context_anl_prefix_freq in shared_contexts:
+            if unseen(context):
+                continue
+            context_freq = self.freq(context)
+            path_out = context_anl_prefix_freq / anl_prefix_freq
+            path_in = context_prefix_freq / prefix_freq
+            anl_prefix_dict[anl_prefix + tuple(suffix)] += path_mean(path_out, path_in)
+    return sorted(anl_prefix_dict.items(), key=lambda x: x[1], reverse=True)
+
+def morph_anls_ending_iter(self, word):
+    prefix_suffix_pairs = ((word[:i], word[i:]) for i in range(1, len(word)))
+    anl_words_dict = defaultdict(float)
+    for prefix, suffix in prefix_suffix_pairs:
+        if self.freq('<' + prefix) == 0 or self.freq(suffix + '>') == 0:
+            continue
+        anls = morph_anls_ending(self, '<' + prefix, suffix + '>')
+        score = sum(x[1] for x in anls)
+        for anl, score in anls:
+            anl_words_dict[anl] += score
+    return dict_format(anl_words_dict)
+
+def dict_format(dy):
+    sorted_dy = sorted(dy.items(), key=lambda x: x[1], reverse=True)
+    return list(map(lambda x: (custom_io.hun_decode(''.join(x[0])), x[1]), sorted_dy))
+
 # Find anl_prefs for pref by examining their right distributions
 def outside_morph_anls(self, pref, suff):
     anl_dict = defaultdict(float)
@@ -350,8 +532,8 @@ def outside_morph_anls(self, pref, suff):
     for anl_pref, anl_pref_suff_freq in anl_prefs:
         if anl_pref == pref:
             continue
-        anl_pref_cell = self.tags(anl_pref + ('>',))
-        anl_word_cell = self.tags(anl_pref + tuple(suff.strip('>')) + ('>',))
+        anl_pref_cell = self.cell(anl_pref + ('>',))
+        anl_word_cell = self.cell(anl_pref + tuple(suff.strip('>')) + ('>',))
         if anl_pref_cell and not anl_word_cell:
             continue
         anl_pref_freq = self.freq(anl_pref)
@@ -408,16 +590,8 @@ def rec_morph_anls(self, word, lookup_dict=None):
         lookup_dict[word] = (best_word_cell, anl_word_list)
         return (best_word_cell, anl_word_list)
 
-def tulip(a, b, c):
-    """Return the "tulip" of sets a, b, and c.
-
-    The "tulip" of sets a, b, and c is the set (b - a) | (c - a) | (a & b & c),
-    a solution to the four-part analogy problem [a : b :: c : ?].
-
-    Arguments:
-        - a, b, c (sets)
-
-    Returns:
-        - (b - a) | (c - a) | (a & b & c)
-    """
-    return (b - a) | (c - a) | (a & b & c)
+def tulip(set_a, set_b, set_c):
+    center = set_a.intersection(set_b).intersection(set_c)
+    left = set_b.difference(set_a)
+    right = set_c.difference(set_a)
+    return left.union(center).union(right)
