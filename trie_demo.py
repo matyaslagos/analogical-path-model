@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from collections import defaultdict
+from collections import Counter
 from itertools import product
 from string import punctuation
 from pprint import pp
@@ -341,10 +342,13 @@ def csv_to_wordfreqdict(filename):
 def outside_morph_anls(self, pref, suff):
     anl_dict = defaultdict(float)
     # If suffix is word-ending, we pretend we haven't seen it
+    is_unseen = lambda x: False
+    """
     is_unseen = (
         (lambda x: x[:len(suff) - 1] == tuple(suff)[:-1]) if '>' in suff
         else (lambda x: False)
     )
+    """
     pref_freq = self.freq(pref)
     anl_prefs = self.left_neighbors(suff, only_completions=True)
     for anl_pref, anl_pref_suff_freq in anl_prefs:
@@ -368,44 +372,59 @@ def outside_morph_anls(self, pref, suff):
             anl_dict[key] += score
     return custom_io.dict_to_list(anl_dict)
 
-def rec_morph_anls(self, word, lookup_dict=None):
+def rec_morph_anls(self, word, lookup_dict=None, return_lookup_dict=False):
     if lookup_dict is None:
         lookup_dict = {}
-    if word == '<':
+    if word == '<>':
         return (frozenset(), [(('<',), 1)])
     elif word in lookup_dict:
-        return lookup_dict[word]
+        return lookup_dict[word]['info']
     else:
         word = custom_io.hun_encode(word)
         pref_suff_pairs = ((word[:i], word[i:]) for i in range(1, len(word.strip('>'))))
         anl_words = defaultdict(float)
-        word_cells = defaultdict(float)
+        tag_scores = defaultdict(float)
+        split_analysis = {}
         for pref, suff in pref_suff_pairs:
+            split_dict = defaultdict(lambda: defaultdict(float))
+            triple_dict = defaultdict(lambda: defaultdict(float))
             # Recursive call
-            pref_cell, anl_prefs = rec_morph_anls(self, pref, lookup_dict)
+            pref_cell, anl_prefs = rec_morph_anls(self, pref + '>', lookup_dict)
             anl_prefs = anl_prefs.copy()[:20]# + [(pref, 1)]
             # Find outside analogies
             # TODO: integrate into recursive analogy finding below
             outside_anl_bases = outside_morph_anls(self, pref, suff)[:10]
             for anl_base, score in outside_anl_bases:
                 anl_pref, anl_pref_cell, anl_word_cell = anl_base
+                anl_triple = (anl_pref_cell, anl_word_cell, pref_cell)
                 anl_word = anl_pref + tuple(suff)
+                triple_dict[anl_triple][anl_word] += score
                 anl_words[anl_word] += score
-                word_cell = tulip(anl_pref_cell, anl_word_cell, pref_cell)
-                word_cells[word_cell] += score
             # Find recursive (inside-indirect) analogies
             for anl_pref, anl_pref_score in anl_prefs:
                 inside_anl_bases = outside_morph_anls(self, anl_pref, suff)[:10]
                 for anl_base, score in inside_anl_bases:
                     anl_pref, anl_pref_cell, anl_word_cell = anl_base
+                    anl_triple = (anl_pref_cell, anl_word_cell, pref_cell)
                     anl_word = anl_pref + tuple(suff)
+                    triple_dict[anl_triple][anl_word] += math.sqrt(score * anl_pref_score)
                     anl_words[anl_word] += math.sqrt(score * anl_pref_score)
-                    word_cell = tulip(anl_pref_cell, anl_word_cell, pref_cell)
-                    word_cells[word_cell] += math.sqrt(score * anl_pref_score)
-        best_word_cell = sorted(word_cells.keys(), key=word_cells.get, reverse=True)[0]
+            tag_dict = defaultdict(dict)
+            for anl_triple, triple_words in triple_dict.items():
+                tag = tulip(*anl_triple)
+                a, b, c = anl_triple
+                tupled_anl_triple = (('anl_pref', tuple(a)), ('anl_word', tuple(b)), ('pref', tuple(c)))
+                tag_dict[tag][tupled_anl_triple] = triple_words
+                tag_scores[tag] += sum(triple_words.values())
+            split_analysis[(pref, suff)] = tag_dict
+        best_tag = (sorted(tag_scores.keys(), key=tag_scores.get, reverse=True) + [frozenset()])[0]
         anl_word_list = custom_io.dict_to_list(anl_words)
-        lookup_dict[word] = (best_word_cell, anl_word_list)
-        return (best_word_cell, anl_word_list)
+        lookup_dict[word] = {'info': (best_tag, anl_word_list),
+                             'analysis': split_analysis}
+        if not return_lookup_dict:
+            return (best_tag, anl_word_list)
+        else:
+            return lookup_dict
 
 def tulip(a, b, c):
     """Return the "tulip" of sets a, b, and c.
@@ -420,3 +439,51 @@ def tulip(a, b, c):
         - (b - a) | (c - a) | (a & b & c)
     """
     return (b - a) | (c - a) | (a & b & c)
+
+def analyser(analysis_dict):
+    split_scores = {}
+    split_best_tags = {}
+    for split, tag_dict in analysis_dict.items():
+        tag_scores = defaultdict(float)
+        tag_best_anl_triples = {}
+        for tag, triple_dict in tag_dict.items():
+            anl_triple_scores = defaultdict(float)
+            anl_triple_best_words = {}
+            for anl_triple, word_scores in triple_dict.items():
+                anl_triple_scores[anl_triple] = sum(word_scores.values())
+                best_words = list(map(lambda x: custom_io.hun_decode(''.join(x)),
+                                      sorted(word_scores.keys(),
+                                             key=word_scores.get,
+                                             reverse=True)[:5]))
+                anl_triple_best_words[anl_triple] = best_words
+            tag_scores[tuple(tag)] = sum(anl_triple_scores.values())
+            best_anl_triples = sorted(anl_triple_best_words.items(),
+                                      key=lambda x: anl_triple_scores[x[0]],
+                                      reverse=True)[:5]
+            tag_best_anl_triples[tuple(tag)] = best_anl_triples
+        split_scores[split] = sum(tag_scores.values())
+        best_tags = sorted(tag_best_anl_triples.items(),
+                           key=lambda x: tag_scores[x[0]],
+                           reverse=True)[:5]
+        split_best_tags[split] = best_tags
+    best_splits = sorted(split_best_tags.items(),
+                         key=lambda x: split_scores[x[0]],
+                         reverse=True)
+    return best_splits
+
+def naive_tag_finder(self, word):
+    current_node = self.bw_root
+    suffix = ''
+    for token in reversed(word):
+        if token in current_node.children:
+            suffix = token + suffix
+            current_node = current_node.children[token]
+        else:
+            break
+    print(suffix)
+    if suffix == word:
+        return self.tags(word)
+    tags = Counter()
+    for prefix, freq in self.left_neighbors(suffix, only_completions=True):
+        tags[self.tags(''.join(prefix) + suffix)] += freq
+    return sorted(tags.keys(), key=tags.get, reverse=True)[0]
