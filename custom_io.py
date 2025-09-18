@@ -73,12 +73,12 @@ def hun_decode(word):
 
 #> Prettyprinting dictionaries <#
 
-def dict_to_list(dy, mapping=lambda x: x):
+def sorted_items(dy, mapping=lambda x: x):
     mapped_items = ((mapping(key), value) for key, value in dy.items())
     return sorted(mapped_items, key=lambda x: x[1], reverse=True)
 
 def dict_to_list_hun_decode(dy):
-    return dict_sort(dy, mapping=lambda x: hun_decode(''.join(x)))
+    return sorted_items(dy, mapping=lambda x: hun_decode(''.join(x)))
 
 def custom_pp(list):
     pp([(hun_decode(''.join(x[0])), x[1]) for x in list])
@@ -133,3 +133,20 @@ def sztaki_tsv_nouns_by_lemmas_import():
                 tag = xpostag_set(row[3])
                 lemmas[lemma][(word_form, tag)] += 1
     return lemmas
+
+def sztaki_tsv_noun_tag_wordform_lemma_import():
+    sztaki_corpus_path = 'corpora/sztaki_corpus_2017_2018_0001_clean.tsv'
+    with open(sztaki_corpus_path, newline='') as f:
+        reader = csv.reader(
+            (row for row in f if row.strip() and not row.startswith('#')),
+            delimiter='\t'
+        )
+        next(reader, None) # skip first line
+        is_hun_char = lambda x: x.lower() in ascii_lowercase + 'áéíóúöőüű'
+        is_hun_string = lambda x: all(map(is_hun_char, x))
+        for row in reader:
+            if len(row) >= 4 and row[3].startswith('[/N]') and is_hun_string(row[0]):
+                word_form = hun_encode(row[0].lower())
+                lemma = hun_encode(row[2].lower())
+                tag = xpostag_set(row[3])
+                yield (tag, word_form, lemma)
