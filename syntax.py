@@ -233,17 +233,17 @@ class FreqTrie:
                                                       direction, max_length, min_length,
                                                       only_completions, new_path)
 
-    def right_analogical_bases(self, sequence, max_length=float('inf'), weighting=True):
+    def right_analogical_bases(self, sequence, max_length=float('inf')):
         """Return dict of analogical bases of sequence based on right contexts.
         """
-        return self._analogical_bases(sequence, 'fw', max_length, weighting)
+        return self._analogical_bases(sequence, 'fw', max_length)
 
-    def left_analogical_bases(self, sequence, max_length=float('inf'), weighting=True):
+    def left_analogical_bases(self, sequence, max_length=float('inf')):
         """Return dict of analogical bases of sequence based on left contexts.
         """
-        return self._analogical_bases(sequence, 'bw', max_length, weighting)
+        return self._analogical_bases(sequence, 'bw', max_length)
 
-    def _analogical_bases(self, sequence, direction, max_length=float('inf'), weighting=True):
+    def _analogical_bases(self, sequence, direction, max_length=float('inf')):
         """Return dict of analogical bases of target sequence given direction.
 
         Sequence s1 is an analogical base of target sequence s2 to degree r if
@@ -251,19 +251,17 @@ class FreqTrie:
         """
         target_freq = self.freq(sequence)
         base_dict = defaultdict(float)
-        max_neighbor_length = 3
-        contexts = self._neighbors(sequence, direction, max_neighbor_length)
-        weight = 1 / max_neighbor_length if weighting else 1
+        contexts = self._neighbors(sequence, direction)
         for context, context_target_freq in contexts:
             context_freq = self.freq(context)
             # Probability of going from context to target
-            context_target_prob = (context_target_freq / context_freq) * weight
+            context_target_prob = context_target_freq / context_freq
             other_direction = 'bw' if direction == 'fw' else 'fw'
             bases = self._neighbors(context, other_direction, max_length)
             for base, context_base_freq in bases:
                 base_freq = self.freq(base)
                 # Probability of going from source to context
-                context_base_prob = (context_base_freq / base_freq) * weight
+                context_base_prob = context_base_freq / base_freq
                 base_dict[base] += min(context_target_prob, context_base_prob)
         return base_dict
 
