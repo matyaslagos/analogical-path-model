@@ -5,7 +5,7 @@ from string import punctuation
 from pprint import pp
 import math
 import csv
-import custom_io
+import custom_io as cio
 
 #-----------------#
 # Setup functions #
@@ -36,7 +36,8 @@ class MorphModel():
             self.lemmas[lemma].add(tag)
 
 def anl_bases(self, lemma, target_tag):
-    starting_tags = self.lemmas[lemma]
+    encoded_lemma = cio.hun_encode(lemma)
+    starting_tags = self.lemmas[encoded_lemma]
     shared_tag_dict = defaultdict(set)
     candidate_lemmas = self.tagtries[target_tag].root.lemmas.keys()
     for candidate_lemma in candidate_lemmas:
@@ -45,20 +46,50 @@ def anl_bases(self, lemma, target_tag):
     return dict(shared_tag_dict)
 
 def most_similar_bases(self, lemma, target_tag):
+    encoded_lemma = cio.hun_encode(lemma)
     tag_dict = {}
-    bases = anl_bases(self, lemma, target_tag)
+    bases = anl_bases(self, encoded_lemma, target_tag)
+    new_wordforms = Counter()
     for tag, anl_lemmas in bases.items():
         anl_lemma_dict = {}
         tag_trie = self.tagtries[tag]
+        lemma_wordform = wordform(self, encoded_lemma, tag)
         for anl_lemma in anl_lemmas:
             common_suffix = ''
+            anl_lemma_node = None
             current_node = tag_trie.root
             while anl_lemma in current_node.lemmas:
                 common_suffix = current_node.label + common_suffix
-                current_node = current_node.lemmas[lemma]
-            anl_lemma_dict[anl_lemma] = common_suffix
+                anl_lemma_node = current_node
+                current_node = current_node.lemmas[encoded_lemma]
+            anl_lemma_wordform = common_suffix
+            while anl_lemma in anl_lemma_node.lemmas:
+                anl_lemma_node = anl_lemma_node.lemmas[anl_lemma]
+                anl_lemma_wordform = anl_lemma_node.label + anl_lemma_wordform
+            target_anl_lemma_wordform = wordform(self, anl_lemma, target_tag)
+            anl_prefix = anl_lemma_wordform.removesuffix(common_suffix)
+            added_suffix = target_anl_lemma_wordform.removeprefix(anl_prefix)
+            new_wordform = cio.hun_decode(lemma_wordform.removesuffix(common_suffix) + added_suffix)
+            if added_suffix == target_anl_lemma_wordform:
+                added_suffix = '***bad***'
+                new_wordforms[new_wordform] -= 1
+            else:
+                new_wordforms[new_wordform] += 1
+            # TODO: compute prefix of target_lemma, add added_suffix
+            anl_lemma_dict[anl_lemma] = (common_suffix, anl_lemma_wordform, target_anl_lemma_wordform, anl_prefix, added_suffix, new_wordform)
+            
         tag_dict[tag] = anl_lemma_dict
-    return tag_dict
+    return new_wordforms.most_common()
+
+def wordform(model, lemma, target_tag):
+    word = ''
+    tag_trie = model.tagtries[target_tag]
+    current_node = tag_trie.root
+    while lemma in current_node.lemmas:
+        word = current_node.label + word
+        current_node = current_node.lemmas[lemma]
+    word = current_node.label + word
+    return word
 
 #--------------------------#
 # TagTrie class definition #

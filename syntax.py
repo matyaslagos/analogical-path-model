@@ -255,7 +255,7 @@ class FreqTrie:
         """
         target_freq = self.freq(sequence)
         base_dict = defaultdict(float)
-        contexts = self._neighbors(sequence, direction)
+        contexts = self._neighbors(sequence, direction, 2)
         for context, context_target_freq in contexts:
             context_freq = self.freq(context)
             # Probability of going from context to target
@@ -266,7 +266,7 @@ class FreqTrie:
                 base_freq = self.freq(base)
                 # Probability of going from source to context
                 context_base_prob = context_base_freq / base_freq
-                base_dict[base] += (context_target_prob * context_base_prob)
+                base_dict[base] += min(context_target_prob, context_base_prob)
         return base_dict
 
 def bilateral_analogical_bases(self, sequence, max_length=float('inf')):
@@ -275,7 +275,7 @@ def bilateral_analogical_bases(self, sequence, max_length=float('inf')):
     bilateral_bases = left_base_dict.keys() & right_base_dict.keys()
     bilateral_base_dict = {}
     for base in bilateral_bases:
-        bilateral_base_dict[base] = (left_base_dict[base] * right_base_dict[base])
+        bilateral_base_dict[base] = min(left_base_dict[base], right_base_dict[base])
     return sorted(bilateral_base_dict.items(), key=lambda x: x[1], reverse=True)
 
 def node_efficiency(sequence_node):
@@ -304,10 +304,32 @@ def prob_neighbors_aux(sequence_node, parent_freq, prob_mass=1, path=[]):
         child_prob_mass = (1 - efficiency) * prob_mass * (node_freq / parent_freq)
         yield from prob_neighbors_aux(child_node, node_freq, child_prob_mass, new_path)
 
+def weighted_condprob(model, context, sequence):
+    context_node = model.sequence_node(context)
+    rem_prob_mass = 1
+    curr_prob_mass = 0
+    parent_freq = context_node.freq
+    for token in sequence:
+        child_node = context_node.children[token]
+        child_freq = child_node.freq
+        efficiency = min(max(0.5, node_efficiency(child_node)), 0.9)
+        curr_prob_mass = rem_prob_mass * efficiency * (child_freq / parent_freq)
+        rem_prob_mass = rem_prob_mass * (1 - efficiency) * (child_freq / parent_freq)
+        parent_freq = child_freq
+        context_node = child_node
+    return curr_prob_mass
+
+def most_prob_neighbors(model, context):
+    neighbors = []
+    for neighbor, freq in model.right_neighbors(context):
+        p = weighted_condprob(model, context, neighbor)
+        neighbors.append((neighbor, p, freq))
+    return sorted(neighbors, key=lambda x: x[1], reverse=True)
+
 def bigram_anls(self, bigram):
     s1, s2 = tuple(bigram.split()[:1]), tuple(bigram.split()[1:])
-    s1_bases = bilateral_analogical_bases(self, s1)[:50]
-    s2_bases = bilateral_analogical_bases(self, s2)[:50]
+    s1_bases = bilateral_analogical_bases(self, s1, len(s1))[:50]
+    s2_bases = bilateral_analogical_bases(self, s2, len(s2))[:50]
     anls = {}
     for s1_anl, s1_score in s1_bases:
         for s2_anl, s2_score in s2_bases:
