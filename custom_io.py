@@ -150,3 +150,20 @@ def sztaki_tsv_noun_tag_wordform_lemma_import():
                 lemma = hun_encode(row[2].lower())
                 tag = xpostag_set(row[3])
                 yield (tag, word_form, lemma)
+
+def sztaki_tsv_noun_tag_wordform_lemma_import_test():
+    sztaki_corpus_path = 'corpora/sztaki_corpus_2017_2018_0002_clean.tsv'
+    with open(sztaki_corpus_path, newline='') as f:
+        reader = csv.reader(
+            (row for row in f if row.strip() and not row.startswith('#')),
+            delimiter='\t'
+        )
+        next(reader, None) # skip first line
+        is_hun_char = lambda x: x.lower() in ascii_lowercase + 'áéíóúöőüű'
+        is_hun_string = lambda x: all(map(is_hun_char, x))
+        for row in reader:
+            if len(row) >= 4 and row[3].startswith('[/N]') and is_hun_string(row[0]):
+                word_form = hun_encode(row[0].lower())
+                lemma = hun_encode(row[2].lower())
+                tag = xpostag_set(row[3])
+                yield (lemma, tag, word_form)

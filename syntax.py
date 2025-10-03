@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-import math
-import custom_io as cio
 from collections import defaultdict, Counter
 from itertools import product
+from operator import itemgetter
+from heapq import nlargest
+import math
 
 #-----------------#
 # Setup functions #
@@ -176,7 +177,7 @@ class FreqTrie:
             child_node = seq_node.children[child]
             freq = child_node.freq
             if len(new_path) >= min_length:
-                if (not only_completions) or (child in '<>'):
+                if (not only_completions) or (child in {'<','>'}):
                     yield (tuple(new_path), freq)
             yield from self._neighbors_aux(child_node, direction,
                                            max_length, min_length,
@@ -194,7 +195,7 @@ class FreqTrie:
 
     def _shared_neighbors(self, sequence_1, sequence_2, direction='fw',
                           max_length=float('inf'), min_length=0, only_completions=False):
-        """Return generator of shared fillers of sequence_1 and sequence_2 up to max_length.
+        """Return generator of shared neighbors of sequence_1 and sequence_2.
 
         Arguments:
             sequence_1 (tuple of strings): e.g. ('_', 'is', 'good')
@@ -215,7 +216,7 @@ class FreqTrie:
 
     def _shared_neighbors_aux(self, seq_node_1, seq_node_2, direction,
                               max_length, min_length, only_completions, path):
-        """Yield each shared filler of context_node_1 and context_node_2 up to max_length.
+        """Yield shared neighbors of seq_node_1 and seq_node_2.
         """
         if len(path) >= max_length:
             return
@@ -227,27 +228,27 @@ class FreqTrie:
                 freq_1 = child_node_1.freq
                 freq_2 = child_node_2.freq
                 if len(new_path) >= min_length:
-                    if (not only_completions) or (child in '<>'):
+                    if (not only_completions) or (child in {'<','>'}):
                         yield (tuple(new_path), freq_1, freq_2)
                 yield from self._shared_neighbors_aux(child_node_1, child_node_2,
                                                       direction, max_length, min_length,
                                                       only_completions, new_path)
 
-    def right_analogical_bases(self, sequence, max_length=float('inf')):
+    def right_analogies(self, sequence, max_length=float('inf')):
         """Return dict of analogical bases of sequence based on right contexts.
         """
-        return self._analogical_bases(sequence, 'fw', max_length)
+        return self._analogies(sequence, 'fw', max_length)
 
-    def left_analogical_bases(self, sequence, max_length=float('inf')):
+    def left_analogies(self, sequence, max_length=float('inf')):
         """Return dict of analogical bases of sequence based on left contexts.
         """
-        return self._analogical_bases(sequence, 'bw', max_length)
+        return self._analogies(sequence, 'bw', max_length)
 
-    def _analogical_bases(self, sequence, direction, max_length=float('inf')):
-        """Return dict of analogical bases of target sequence given direction.
+    def _analogies(self, sequence, direction, max_length=float('inf')):
+        """Return analogies of target sequence in the given direction.
 
-        Sequence s1 is an analogical base of target sequence s2 to degree r if
-        we can substitute s1 by s2 in arbitrary contexts with certainty r.
+        A source is an analogy of a target with score s if source can be
+        substituted by target with degree of certainty s.
         """
         target_freq = self.freq(sequence)
         base_dict = defaultdict(float)
@@ -262,52 +263,80 @@ class FreqTrie:
                 base_freq = self.freq(base)
                 # Probability of going from source to context
                 context_base_prob = context_base_freq / base_freq
-                base_dict[base] += min(context_target_prob, context_base_prob)
+                base_dict[base] += combine_path_scores(context_target_prob, context_base_prob)
         return base_dict
 
 #-----------------------------#
 # Analogical parser functions #
 #-----------------------------#
 
-def bilateral_analogical_bases(model, sequence):
-    left_base_dict = model.left_analogical_bases(sequence, len(sequence))
-    right_base_dict = model.right_analogical_bases(sequence, len(sequence))
-    bilateral_bases = left_base_dict.keys() & right_base_dict.keys()
-    bilateral_base_dict = {}
-    for base in bilateral_bases:
-        bilateral_base_dict[base] = min(left_base_dict[base], right_base_dict[base])
-    return sorted(bilateral_base_dict.items(), key=lambda x: x[1], reverse=True)
+def combine_path_scores(source_to_context_prob, context_to_target_prob):
+    """Combine the conditional probabilities an analogical path.
+    """
+    return min(source_to_context_prob, context_to_target_prob)
 
-def bigram_anls(model, bigram):
-    s1, s2 = tuple(bigram.split()[:1]), tuple(bigram.split()[1:])
-    s1_bases = bilateral_analogical_bases(model, s1, 1)[:50]
-    s2_bases = bilateral_analogical_bases(model, s2, 1)[:50]
+def combine_side_scores(left_subst_score, right_subst_score):
+    """Combine the left- and right-substitutabilities of a phrase by another phrase.
+    """
+    return min(left_subst_score, right_subst_score)
+
+def combine_split_scores(prefix_subst_score, suffix_subst_score):
+    """Combine the substitutabilities of phrases p1, p2 in a split (p1, p2).
+    
+    Suppose we are analysing the split ('my cat', 'was chasing a mouse'). Then if
+        - prefix_subst_score is the degree to which 'the dog' is substitutable
+          by 'my cat', and
+        - suffix_subst_score is the degree to which 'is sleeping' is substitutable
+          by 'was chasing a mouse',
+    then this function returns the degree to which ('the dog', 'is sleeping') is
+    substitutable by ('my cat', 'was chasing a mouse').
+    """
+    return min(prefix_subst_score, suffix_subst_score)
+
+def bilateral_analogies(model, sequence):
+    left_anl_scores = model.left_analogies(sequence, len(sequence))
+    right_anl_scores = model.right_analogies(sequence, len(sequence))
+    bilateral_anls = left_anl_scores.keys() & right_anl_scores.keys()
+    bilateral_anl_scores = {}
+    for anl in bilateral_anls:
+        bilateral_anl_scores[anl] = min(left_anl_scores[anl], right_anl_scores[anl])
+    return nlargest(50, bilateral_anl_scores.items(), key=itemgetter(1))
+
+def bigram_analogies(model, bigram):
+    s1, s2 = ((word,) for word in bigram)
+    s1_anls = bilateral_analogies(model, s1)
+    s2_anls = bilateral_analogies(model, s2)
     anls = {}
-    for s1_anl, s1_score in s1_bases:
-        for s2_anl, s2_score in s2_bases:
-            if model.freq(s1_anl + s2_anl):
-                anls[s1_anl + s2_anl] = (s1_score * s2_score)
-    return sorted(anls.items(), key=lambda x: x[1], reverse=True)
+    for s1_anl, s1_score in s1_anls:
+        for s2_anl, s2_score in s2_anls:
+            n = model.freq(s1_anl + s2_anl)
+            if n:
+                anls[s1_anl + s2_anl] = (s1_score * s2_score) * (n ** (1 / 4))
+    return nlargest(50, anls.items(), key=itemgetter(1))
 
 def bigram_to_unigrams(model, bigram):
-    comp_bigrams = bigram_anls(model, bigram)[:20]
+    bigrams_to_mix = bigram_analogies(model, bigram)
+    return mix_and_reduce(model, bigrams_to_mix, 1)
+
+def mix_and_reduce(model, xgrams, analogy_length):
     bw_weighted_contexts = defaultdict(float)
     fw_weighted_contexts = defaultdict(float)
-    for anl_bigram, weight in comp_bigrams:
+    for anl_bigram, weight in xgrams:
         for bw_context, freq in model.left_neighbors(anl_bigram):
-            bw_weighted_contexts[bw_context] += freq * weight
+            bw_weighted_contexts[bw_context] += freq
         for fw_context, freq in model.right_neighbors(anl_bigram):
-            fw_weighted_contexts[fw_context] += freq * weight
+            fw_weighted_contexts[fw_context] += freq
     bw_target_freq = sum(bw_weighted_contexts.values())
     bw_anl_contexts = defaultdict(lambda: defaultdict(float))
     bw_anls = defaultdict(float)
     for bw_context, context_target_freq in bw_weighted_contexts.items():
         context_freq = model.freq(bw_context)
-        for source, context_source_freq in model.right_neighbors(bw_context, max_length=1):
+        potential_analogies = model.right_neighbors(bw_context, max_length=analogy_length)
+        for source, context_source_freq in potential_analogies:
             source_freq = model.freq(source)
             source_to_context_prob = context_source_freq / source_freq
             context_to_target_prob = context_target_freq / context_freq
-            score = some_mean(source_to_context_prob, context_to_target_prob)
+            score = min(source_to_context_prob, context_to_target_prob)
             bw_anls[source] += score
             bw_anl_contexts[source][bw_context] += score
     fw_target_freq = sum(fw_weighted_contexts.values())
@@ -315,62 +344,112 @@ def bigram_to_unigrams(model, bigram):
     fw_anls = defaultdict(float)
     for fw_context, context_target_freq in fw_weighted_contexts.items():
         context_freq = model.freq(fw_context)
-        for source, context_source_freq in model.left_neighbors(fw_context, max_length=1):
+        potential_analogies = model.left_neighbors(fw_context, max_length=analogy_length)
+        for source, context_source_freq in potential_analogies:
             source_freq = model.freq(source)
             source_to_context_prob = context_source_freq / source_freq
             context_to_target_prob = context_target_freq / context_freq
-            score = some_mean(source_to_context_prob, context_to_target_prob)
+            score = min(source_to_context_prob, context_to_target_prob)
             fw_anls[source] += score
             fw_anl_contexts[source][fw_context] += score
     anls = {}
     context_dict = {}
     for anl in bw_anls.keys() & fw_anls.keys():
         anls[anl] = min(bw_anls[anl], fw_anls[anl])
-        left_contexts = sorted(bw_anl_contexts[anl].items(), key=lambda x: x[1], reverse=True)[:10]
-        right_contexts = sorted(fw_anl_contexts[anl].items(), key=lambda x: x[1], reverse=True)[:10]
+        left_contexts = nlargest(10, bw_anl_contexts[anl].items(), key=itemgetter(1))
+        right_contexts = nlargest(10, fw_anl_contexts[anl].items(), key=itemgetter(1))
         context_dict[anl] = {'left': left_contexts, 'right': right_contexts}
-    return sorted(anls.items(), key=lambda x: x[1], reverse=True)
+    return nlargest(50, anls.items(), key=itemgetter(1))
 
-def rec_anls(model, sequence, lookup_dict=None, return_lookup_dict=False):
+def mix_and_reduce_simple(model, sequences, analogy_length):
+    # Count freq of mix in each context (sum of freqs of sequences in this context)
+    mixed_left_contexts = defaultdict(float)
+    mixed_right_contexts = defaultdict(float)
+    for sequence, _ in sequences:
+        for left_context, freq in model.left_neighbors(sequence):
+            mixed_left_contexts[left_context] += freq
+        for right_context, freq in model.right_neighbors(sequence):
+            mixed_right_contexts[right_context] += freq
+    # Compute left analogies for mix
+    left_anl_contexts = defaultdict(lambda: defaultdict(float))
+    left_anls = defaultdict(float)
+    for left_context, context_target_freq in left_contexts.items():
+        context_freq = model.freq(left_context)
+        sources = model.right_neighbors(left_context, max_length=analogy_length)
+        for source, context_source_freq in sources:
+            source_freq = model.freq(source)
+            source_to_context_prob = context_source_freq / source_freq
+            context_to_target_prob = context_target_freq / context_freq
+            score = combine_path_scores(source_to_context_prob, context_to_target_prob)
+            left_anls[source] += score
+            left_anl_contexts[source][left_context] += score
+    # Compute right analogies for mix
+    right_anl_contexts = defaultdict(lambda: defaultdict(float))
+    right_anls = defaultdict(float)
+    for right_context, context_target_freq in right_contexts.items():
+        context_freq = model.freq(right_context)
+        sources = model.left_neighbors(right_context, max_length=analogy_length)
+        for source, context_source_freq in sources:
+            source_freq = model.freq(source)
+            source_to_context_prob = context_source_freq / source_freq
+            context_to_target_prob = context_target_freq / context_freq
+            score = combine_path_scores(source_to_context_prob, context_to_target_prob)
+            right_anls[source] += score
+            right_anl_contexts[source][right_context] += score
+    anls = {}
+    context_dict = {}
+    for anl in left_anls.keys() & right_anls.keys():
+        anls[anl] = combine_side_scores(left_anls[anl], right_anls[anl])
+        best_left_contexts = nlargest(10, left_anl_contexts[anl].items(), key=itemgetter(1))
+        best_right_contexts = nlargest(10, right_anl_contexts[anl].items(), key=itemgetter(1))
+        context_dict[anl] = {'left': best_left_contexts, 'right': best_right_contexts}
+    return nlargest(50, anls.items(), key=itemgetter(1))
+    
+
+def recursive_analogies(model, sequence, lookup_dict=None, return_lookup_dict=False):
+    # Initialise dynamic lookup dict
     if lookup_dict is None:
         lookup_dict = {}
+    # Dynamic lookup
     if sequence in lookup_dict:
         return lookup_dict[sequence]
+    # Base case
     elif len(sequence) == 1:
         anls = [(sequence, 1)]
         lookup_dict[sequence] = anls
         return anls
+    # Recursive case
     else:
         binary_splits = ((sequence[:i], sequence[i:]) for i in range(1, len(sequence)))
-        anl_base_dict = defaultdict(float)
+        anl_seq_scores = defaultdict(float)
         for prefix, suffix in binary_splits:
-            # Recursive calls
-            rec_prefixes = rec_anls(model, prefix, lookup_dict)
-            rec_suffixes = rec_anls(model, suffix, lookup_dict)
-            # Find analogical sequences
-            anl_sequences = paired_anls(model, prefix, suffix, rec_prefixes, rec_suffixes)
+            # Recursive calls on constituents
+            rec_prefixes = recursive_analogies(model, prefix, lookup_dict)
+            rec_suffixes = recursive_analogies(model, suffix, lookup_dict)
+            # Find analogical sequences for prefix and suffix analogies
+            anl_sequences = pair_analogies(model, prefix, suffix, rec_prefixes, rec_suffixes)
             for anl_sequence, score in anl_sequences:
-                anl_base_dict[anl_sequence] += score
-        sorted_anls = sorted(anl_base_dict.items(), key=lambda x: x[1], reverse=True)
-        lookup_dict[sequence] = sorted_anls
+                anl_seq_scores[anl_sequence] += score
+        best_anls = nlargest(50, anl_seq_scores.items(), key=itemgetter(1))
+        lookup_dict[sequence] = best_anls
         if return_lookup_dict:
             return lookup_dict
         else:
-            return sorted_anls
+            return best_anls
 
-def paired_anls(model, prefix, suffix, rec_prefixes, rec_suffixes):
+def pair_analogies(model, prefix, suffix, rec_prefixes, rec_suffixes):
     prefix_anls = defaultdict(float)
     for rec_prefix, weight in rec_prefixes[:10]:
-        anls = bilateral_analogical_bases(model, rec_prefix, len(prefix))
+        anls = bilateral_analogies(model, rec_prefix)
         for anl, score in anls:
             prefix_anls[anl] += score * weight
-    sorted_prefix_anls = sorted(prefix_anls.items(), key=lambda x: x[1], reverse=True)[:50]
+    sorted_prefix_anls = nlargest(50, prefix_anls.items(), key=itemgetter(1))
     suffix_anls = defaultdict(float)
     for rec_suffix, weight in rec_suffixes[:10]:
-        anls = bilateral_analogical_bases(model, rec_suffix, len(suffix))
+        anls = bilateral_analogies(model, rec_suffix)
         for anl, score in anls:
             suffix_anls[anl] += score * weight
-    sorted_suffix_anls = sorted(suffix_anls.items(), key=lambda x: x[1], reverse=True)[:50]
+    sorted_suffix_anls = nlargest(50, suffix_anls.items(), key=itemgetter(1))
     anls = defaultdict(float)
     for prefix_info, suffix_info in product(sorted_prefix_anls, sorted_suffix_anls):
         prefix_anl, prefix_score = prefix_info
@@ -378,4 +457,4 @@ def paired_anls(model, prefix, suffix, rec_prefixes, rec_suffixes):
         if model.freq(prefix_anl + suffix_anl):
             score = (prefix_score * suffix_score)
             anls[prefix_anl + suffix_anl] += score
-    return sorted(anls.items(), key=lambda x: x[1], reverse=True)
+    return nlargest(50, anls.items(), key=itemgetter(1))
