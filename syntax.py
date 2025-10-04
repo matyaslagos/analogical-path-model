@@ -35,7 +35,7 @@ class FreqNode:
         self.freq = 0
 
     def _increment_or_make_branch(self, sequence, freq=1):
-        """Increment the frequency of token_tuple or make a new branch for it.
+        """Increment the frequency of sequence or make a new branch for it.
         """
         current_node = self
         for token in sequence:
@@ -59,13 +59,13 @@ class FreqTrie:
         """Record distributions of prefixes and suffixes of sequence.
 
         Arguments:
-            - sequence (iterable of strings): e.g. ('<', 'this', 'is', 'good', '>')
-            - freq (int): how many occurrences of sequence should be recorded
+            sequence (iterable of strings): e.g. ('<', 'this', 'is', 'good', '>')
+            freq (int): how many occurrences of sequence should be recorded
 
         Effect:
-            - For each prefix--suffix split of sequence, record the occurrences of
-              prefix and suffix. (Prefix is reversed to make shared-neighbor search more
-              efficient.)
+            For each prefix--suffix split of sequence, record the occurrences of
+            prefix and suffix. (Prefix is reversed to make shared-neighbor search more
+            efficient.)
         """
         # Add token frequency mass of sequence to root nodes (to record corpus size)
         token_freq_mass = len(sequence) * freq
@@ -80,7 +80,7 @@ class FreqTrie:
             self.fw_root._increment_or_make_branch(suffix, freq)
             self.bw_root._increment_or_make_branch(reversed(prefix), freq)
     
-    # Setup model with training corpus
+    # Set up model with training corpus
     def setup(self, training_corpus_path='corpora/norvig_corpus.txt'):
         corpus = txt_to_list(training_corpus_path)
         for sequence in corpus:
@@ -90,22 +90,22 @@ class FreqTrie:
     def sequence_node(self, sequence, direction='fw'):
         """Return the node that represents sequence.
 
-        Argument:
-            sequence (tuple of strings): of the form ('this', 'is', '_') or
-            ('_', 'is', 'good'), with '_' indicating the empty slot. If no
-            slot is indicated, defaults to ('this', 'is', '_')
+        Arguments:
+            sequence (tuple of strings): of the form ('this', 'is')
+            direction (string): 'fw' or 'bw', indicating whether we are looking
+                for forward neighbors or backward neighbors
 
         Returns:
             FreqNode representing sequence.
         """
-        # If left context, look up token sequence in forward trie
+        # If looking for right neighbors, start in root of forward trie
         if direction == 'fw':
             current_node = self.fw_root
-        # If right context, look up reversed token sequence in backward trie
+        # If looking for left neighbors, start in root of backward trie and reverse sequence
         else:
             current_node = self.bw_root
             sequence = reversed(sequence)
-        # General lookup
+        # Go to node of sequence
         for token in sequence:
             try:
                 current_node = current_node.children[token]
@@ -123,19 +123,23 @@ class FreqTrie:
     # Get right neighbors (with frequencies) of sequence
     def right_neighbors(self, sequence, max_length=float('inf'),
                         min_length=0, only_completions=False):
+        """Return generator of (right_neighbor, joint_freq) pairs for sequence.
+        """
         return self._neighbors(sequence, 'fw',
                                max_length, min_length, only_completions)
     
     # Get left neighbors (with frequencies) of sequence
     def left_neighbors(self, sequence, max_length=float('inf'),
                        min_length=0, only_completions=False):
+        """Return generator of (left_neighbor, joint_freq) pairs for sequence.
+        """
         return self._neighbors(sequence, 'bw',
                                max_length, min_length, only_completions)
     
     # Get neighbors of sequence (with frequencies) in direction
     def _neighbors(self, sequence, direction='fw',
                    max_length=float('inf'), min_length=0, only_completions=False):
-        """Return generator of neighbors of sequence with their joint frequency.
+        """Return generator of (neighbor, joint_freq) pairs for sequence in direction.
         """
         seq_node = self.sequence_node(sequence, direction)
         if not seq_node:
@@ -164,12 +168,16 @@ class FreqTrie:
     # Get shared right neighbors (with frequencies) of sequence_1 and sequence_2
     def shared_right_neighbors(self, sequence_1, sequence_2, max_length=float('inf'),
                                min_length=0, only_completions=False):
+        """Return generator of (shared_neighbor, joint_freq_1, joint_freq_2) pairs.
+        """
         return self._shared_neighbors(sequence_1, sequence_2, 'fw',
                                       max_length, min_length, only_completions)
     
     # Get shared left neighbors (with frequencies) of sequence_1 and sequence_2
     def shared_left_neighbors(self, sequence_1, sequence_2, max_length=float('inf'),
                               min_length=0, only_completions=False):
+        """Return generator of (shared_neighbor, joint_freq_1, joint_freq_2) pairs.
+        """
         return self._shared_neighbors(sequence_1, sequence_2, 'bw',
                                       max_length, min_length, only_completions)
     
@@ -179,12 +187,12 @@ class FreqTrie:
         """Return generator of shared neighbors of sequence_1 and sequence_2.
 
         Arguments:
-            sequence_1 (tuple of strings): e.g. ('_', 'is', 'good')
-            sequence_2 (tuple of strings): e.g. ('_', 'was', 'here')
+            sequence_1 (tuple of strings): e.g. ('is', 'good')
+            sequence_2 (tuple of strings): e.g. ('was', 'here')
 
         Returns:
-            generator of (filler, freq_1, freq_2) tuples:
-                if e.g. the tuple (('this', '_'), 23, 10) is yielded, then:
+            generator of (neighbor, freq_1, freq_2) tuples:
+                if direction is 'bw' and the tuple (('this',), 23, 10) is yielded:
                 - 'this' occurred before 'is good' 23 times, and
                 - 'this' occurred before 'was here' 10 times.
         """
@@ -217,38 +225,38 @@ class FreqTrie:
                                                       only_completions, new_path)
     # Get right analogies (with scores) of sequence
     def right_analogies(self, sequence, max_length=float('inf')):
-        """Return dict of analogical bases of sequence based on right contexts.
+        """Return dict of analogies of sequence based on right contexts.
         """
         return self._analogies(sequence, 'fw', max_length)
 
     # Get left analogies (with scores) of sequence
     def left_analogies(self, sequence, max_length=float('inf')):
-        """Return dict of analogical bases of sequence based on left contexts.
+        """Return dict of analogies of sequence based on left contexts.
         """
         return self._analogies(sequence, 'bw', max_length)
     
     # Get analogies (with scores) of sequence in direction
     def _analogies(self, sequence, direction, max_length=float('inf')):
         """Return analogies of target sequence in the given direction.
-
-        A source is an analogy of a target with score s if source can be
-        substituted by target with degree of certainty s.
         """
         target_freq = self.freq(sequence)
-        base_dict = defaultdict(float)
+        source_scores = defaultdict(float)
+        # For each context, find sources that can be substituted by target, i.e.
+        # such that we can go (source -> context –> target) with high probability
         contexts = self._neighbors(sequence, direction)
         for context, context_target_freq in contexts:
             context_freq = self.freq(context)
             # Probability of going from context to target
             context_target_prob = context_target_freq / context_freq
             other_direction = 'bw' if direction == 'fw' else 'fw'
-            bases = self._neighbors(context, other_direction, max_length)
-            for base, context_base_freq in bases:
-                base_freq = self.freq(base)
+            sources = self._neighbors(context, other_direction, max_length)
+            for source, context_source_freq in sources:
+                source_freq = self.freq(source)
                 # Probability of going from source to context
-                context_base_prob = context_base_freq / base_freq
-                base_dict[base] += combine_path_scores(context_target_prob, context_base_prob)
-        return base_dict
+                context_source_prob = context_source_freq / source_freq
+                source_score = combine_path_scores(context_target_prob, context_base_prob)
+                source_scores[source] += source_score
+        return source_scores
 
 #-----------------------------#
 # Analogical parser functions #
@@ -278,8 +286,8 @@ def combine_split_scores(prefix_subst_score, suffix_subst_score):
     return min(prefix_subst_score, suffix_subst_score)
 
 def bilateral_analogies(model, sequence):
-    left_anl_scores = model.left_analogies(sequence, len(sequence))
-    right_anl_scores = model.right_analogies(sequence, len(sequence))
+    left_anl_scores = model.left_analogies(sequence, max_length=len(sequence))
+    right_anl_scores = model.right_analogies(sequence, max_length=len(sequence))
     bilateral_anls = left_anl_scores.keys() & right_anl_scores.keys()
     bilateral_anl_scores = {}
     for anl in bilateral_anls:
