@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-from collections import defaultdict, Counter
+from collections import defaultdict
 from itertools import product
 from operator import itemgetter
 from heapq import nlargest
-import math
 
 #-----------------#
 # Setup functions #
