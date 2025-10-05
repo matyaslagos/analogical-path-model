@@ -285,7 +285,7 @@ def combine_split_scores(prefix_subst_score, suffix_subst_score):
     """
     return min(prefix_subst_score, suffix_subst_score)
 
-def bilateral_analogies(model, sequence):
+def bilateral_analogies(model: FreqTrie, sequence: tuple[str, ...]):
     left_anl_scores = model.left_analogies(sequence, max_length=len(sequence))
     right_anl_scores = model.right_analogies(sequence, max_length=len(sequence))
     bilateral_anls = left_anl_scores.keys() & right_anl_scores.keys()
@@ -294,7 +294,7 @@ def bilateral_analogies(model, sequence):
         bilateral_anl_scores[anl] = min(left_anl_scores[anl], right_anl_scores[anl])
     return nlargest(50, bilateral_anl_scores.items(), key=itemgetter(1))
 
-def bigram_analogies(model, bigram):
+def bigram_analogies(model: FreqTrie, bigram: tuple[str, str]):
     s1, s2 = ((word,) for word in bigram)
     s1_anls = bilateral_analogies(model, s1)
     s2_anls = bilateral_analogies(model, s2)
@@ -306,18 +306,18 @@ def bigram_analogies(model, bigram):
                 anls[s1_anl + s2_anl] = (s1_score * s2_score) * n
     return nlargest(50, anls.items(), key=itemgetter(1))
 
-def bigram_to_unigrams(model, bigram):
+def bigram_to_unigrams(model: FreqTrie, bigram: tuple[str, str]):
     bigrams_to_mix = bigram_analogies(model, bigram)
     return mix_and_reduce(model, bigrams_to_mix, 1)
 
-def mix_and_reduce(model, sequences, analogy_length):
+def mix_and_reduce(model, weighted_sequences, analogy_length):
     # Sum the frequencies of sequences in left contexts and in right contexts
     # to get the frequency of the mixed distribution in each context
     left_contexts = defaultdict(float)
     right_contexts = defaultdict(float)
-    for sequence, _ in sequences:
+    for sequence, _ in weighted_sequences:
         for left_context, freq in model.left_neighbors(sequence):
-            left_contexts[left_context] += freq
+            left_contexts[left_context] += freq # weight is unnecessary
         for right_context, freq in model.right_neighbors(sequence):
             right_contexts[right_context] += freq
     # Find left analogies for mixed distribution
