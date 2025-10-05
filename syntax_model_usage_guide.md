@@ -16,7 +16,7 @@ In the `fw_root` trie, each node's `.freq` attribute represents the frequency of
 <img width="799" height="477" alt="Screenshot 2025-10-05 at 17 49 45" src="https://github.com/user-attachments/assets/92d3998f-4fcf-4762-a3e3-495947dd33dc" />
 
 
-## Example usage
+## Example usage (once setup above is done)
 
 What are the 10 best analogies for the word `idea`?
 ```python
