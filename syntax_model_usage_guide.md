@@ -11,7 +11,7 @@ The `FreqTrie` data structure looks like the image below. The image illustrates 
 - green edges with nodes are added (represented by the `dict`-type `.children` attribute of `FreqNode`), and
 - frequencies are updated (represented by the `int`-type `.freq` attribute of `FreqNode`).
 
-In the `fw_root` trie, each node's `.freq` attribute represents the frequency of the string with which we can reach that node; in the `bw_root` trie, each node's `.freq` attribute represents the frequency of the _reverse_ of the string with which we can reach that node.
+In the `fw_root` trie, each node's `.freq` attribute represents the frequency of the word sequence with which we can reach that node; in the `bw_root` trie, each node's `.freq` attribute represents the frequency of the _reverse_ of the word sequence with which we can reach that node.
 
 <img width="799" height="477" alt="Screenshot 2025-10-05 at 17 49 45" src="https://github.com/user-attachments/assets/92d3998f-4fcf-4762-a3e3-495947dd33dc" />
 
