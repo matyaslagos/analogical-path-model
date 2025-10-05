@@ -7,7 +7,7 @@ import syntax_model as syn
 model = syn.FreqTrie()
 model.setup() # ~30 secs, needs file with path 'corpora/norvig_corpus.txt'
 ```
-The `FreqTrie` data structure looks like the image below. The image illustrates the `_insert()` method inserting some prefixes and suffixes of the sequence `the quick fox ran towards me`. The black part of the trie already exists, and is now updated with all prefixes of `the quick fox` and all suffixes of `ran towards me`:
+The `FreqTrie` data structure looks like the image below. The image illustrates the `_insert()` method inserting some prefixes and suffixes of the sequence `the quick fox ran towards me`. The black part of the trie already exists, and is now updated with all prefixes of `the quick fox` and all suffixes of `ran towards me` (when called on a sequence, `_insert()` inserts all of its prefixes and suffixes):
 - green edges with nodes are added (represented by the `dict`-type `.children` attribute of `FreqNode`), and
 - frequencies are updated (represented by the `int`-type `.freq` attribute of `FreqNode`).
 
