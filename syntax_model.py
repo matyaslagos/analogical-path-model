@@ -253,7 +253,7 @@ class FreqTrie:
                 source_freq = self.freq(source)
                 # Probability of going from source to context
                 context_source_prob = context_source_freq / source_freq
-                source_score = combine_path_scores(context_target_prob, context_base_prob)
+                source_score = combine_path_scores(context_target_prob, context_source_prob)
                 source_scores[source] += source_score
         return source_scores
 
