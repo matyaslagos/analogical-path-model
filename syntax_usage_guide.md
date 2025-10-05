@@ -1,8 +1,8 @@
-# Usage guide for `syntax.py`
+# Usage guide for `syntax_model.py`
 Setup:
 ```python
 from pprint import pp # pretty printing
-import syntax as syn
+import syntax_model as syn
 model = syn.FreqTrie()
 model.setup() # ~30 secs, needs file with path 'corpora/norvig_corpus.txt'
 ```
