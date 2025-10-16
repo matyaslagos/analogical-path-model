@@ -2,7 +2,7 @@
 
 ## Setup and usage of some functions
 
-Setting up the model:
+Setting up the model using [Peter Norvig's Gutenberg corpus](https://github.com/matyaslagos/analogical-path-models/blob/main/corpora/norvig_corpus.txt):
 ```python
 import syntax_model as syn
 model = syn.FreqTrie()
