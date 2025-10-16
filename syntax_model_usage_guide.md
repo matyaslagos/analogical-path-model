@@ -1,4 +1,4 @@
-# Usage guide for `syntax_model.py`
+# Usage guide for [`syntax_model.py`](https://github.com/matyaslagos/analogical-path-models/blob/main/syntax_model.py)
 
 ## Setup and data structure overview
 
